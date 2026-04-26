@@ -1,7 +1,7 @@
 import pytest
 
 from coin_trading.config import Settings
-from coin_trading.llm.providers import OpenRouterTradingLLM, create_llm
+from coin_trading.llm.providers import OpenRouterTradingLLM, SYSTEM_PROMPT, create_llm
 
 
 def test_openrouter_provider_requires_api_key() -> None:
@@ -112,3 +112,9 @@ def test_openrouter_normalizes_string_risk_notes() -> None:
 
     assert result.decision.action == "BUY"
     assert result.decision.risk_notes == ["single note"]
+
+
+def test_system_prompt_enforces_hold_bias_and_risk_notes_array() -> None:
+    assert "Prefer HOLD when signal quality is weak" in SYSTEM_PROMPT
+    assert "risk_notes must always be an array of strings" in SYSTEM_PROMPT
+    assert "Never set allocation_pct above portfolio.max_position_allocation_pct." in SYSTEM_PROMPT

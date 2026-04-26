@@ -229,7 +229,7 @@ def test_decide_once_blocks_duplicate_daily_decision() -> None:
         )
     )
     session.commit()
-    pipeline = _pipeline(Settings(scheduler_timezone="Asia/Seoul"))
+    pipeline = _pipeline(Settings(scheduler_timezone="Asia/Seoul", decision_cooldown_minutes=1440))
 
     result = pipeline.decide_once(session)
 
