@@ -39,12 +39,14 @@ class Settings(BaseSettings):
     liquidation_buffer: float = Field(default=0.08, gt=0, le=0.50)
     kill_switch_drawdown: float = Field(default=0.10, gt=0, le=0.90)
 
-    llm_provider: Literal["mock", "openai", "gemini", "openrouter"] = "mock"
+    llm_provider: Literal["mock", "openai", "gemini", "openrouter", "nvidia"] = "mock"
     llm_model: str = "gpt-4o-mini"
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    nvidia_api_key: str | None = None
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
 
     binance_api_key: str | None = None
     binance_api_secret: str | None = None

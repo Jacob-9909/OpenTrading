@@ -10,6 +10,7 @@ dependencies = [
     "feedparser",
     "google-genai",
     "httpx",
+    "litellm",
     "numpy",
     "openai",
     "pandas",

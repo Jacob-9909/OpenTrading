@@ -262,6 +262,55 @@ class GeminiTradingLLM(TradingLLM):
         )
 
 
+class NvidiaTradingLLM(TradingLLM):
+    provider = "nvidia"
+
+    def __init__(self, api_key: str, model: str, base_url: str) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url
+
+    def decide(self, context: dict) -> LLMResult:
+        import litellm
+
+        try:
+            response = litellm.completion(
+                model=f"openai/{self.model}",  # Using openai/ prefix to ensure it uses the provided base_url correctly
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+                ],
+                api_key=self.api_key,
+                base_url=self.base_url,
+                temperature=1,
+                top_p=0.95,
+                max_tokens=16384,
+                extra_body={"chat_template_kwargs": {"thinking": False}},
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:
+            if _is_rate_limit_error(exc):
+                return _hold_result(
+                    self.provider,
+                    self.model,
+                    "NVIDIA provider is rate-limited; fallback to HOLD.",
+                    {"error": str(exc), "error_type": exc.__class__.__name__},
+                )
+            raise
+
+        content = response.choices[0].message.content or "{}"
+        payload = json.loads(content)
+        decision = _decision_or_hold(self.provider, self.model, payload)
+        usage = response.usage.model_dump() if hasattr(response, "usage") and response.usage else None
+        return LLMResult(
+            provider=self.provider,
+            model=self.model,
+            decision=decision,
+            raw_response=payload,
+            token_usage=usage,
+        )
+
+
 def create_llm(settings: Settings) -> TradingLLM:
     if settings.llm_provider == "openai":
         if not settings.openai_api_key:
@@ -278,5 +327,13 @@ def create_llm(settings: Settings) -> TradingLLM:
             api_key=settings.openrouter_api_key,
             model=settings.llm_model,
             base_url=settings.openrouter_base_url,
+        )
+    if settings.llm_provider == "nvidia":
+        if not settings.nvidia_api_key:
+            raise ValueError("NVIDIA_API_KEY is required when LLM_PROVIDER=nvidia.")
+        return NvidiaTradingLLM(
+            api_key=settings.nvidia_api_key,
+            model=settings.llm_model,
+            base_url=settings.nvidia_base_url,
         )
     return MockTradingLLM()
