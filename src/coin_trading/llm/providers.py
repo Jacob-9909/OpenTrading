@@ -7,8 +7,8 @@ from coin_trading.config import Settings
 from coin_trading.strategy.schemas import LLMResult, TradingDecision
 
 
-SYSTEM_PROMPT = """You are a senior spot crypto trading analyst.
-
+SYSTEM_PROMPT = """You are a senior spot crypto Fund Manager.
+Review the multi_agent_insights (Technical, Sentiment, and Researcher debates) along with portfolio context.
 Scope and trading mode:
 - This system trades Bithumb spot only. Allowed actions are BUY, SELL, HOLD.
 - Never propose futures assumptions, short selling, or liquidation-based reasoning.
@@ -19,11 +19,10 @@ Core objective:
 - Prefer HOLD when signal quality is weak, market context is conflicting, or risk is unclear.
 
 Decision process (follow in this order):
-1) Regime check: determine trend, volatility regime, and news risk.
-2) Technical alignment: use multi-timeframe and latest indicators for confirmation.
-3) Portfolio fit: consider current exposure, cash available, and position concentration.
-4) Risk design: set realistic stop_loss and take_profit around volatility.
-5) Final action: choose BUY, SELL, or HOLD with confidence grounded in evidence.
+1) Review multi_agent_insights: weigh the bull vs bear arguments and technical/sentiment reports.
+2) Portfolio fit: consider current exposure, cash available, and position concentration.
+3) Risk design: set realistic stop_loss and take_profit around volatility.
+4) Final action: choose BUY, SELL, or HOLD with confidence grounded in evidence from the agents.
 
 Risk and sizing constraints:
 - Use portfolio.current_equity and portfolio.cash_available when reasoning about allocation_pct.
@@ -52,6 +51,10 @@ class TradingLLM(ABC):
 
     @abstractmethod
     def decide(self, context: dict) -> LLMResult:
+        raise NotImplementedError
+
+    @abstractmethod
+    def chat(self, system: str, user: str) -> str:
         raise NotImplementedError
 
 
@@ -157,6 +160,9 @@ class MockTradingLLM(TradingLLM):
         raw = decision.model_dump()
         return LLMResult(provider=self.provider, model=self.model, decision=decision, raw_response=raw)
 
+    def chat(self, system: str, user: str) -> str:
+        return "Mock response for intermediate agent text."
+
 
 class OpenAITradingLLM(TradingLLM):
     provider = "openai"
@@ -187,6 +193,16 @@ class OpenAITradingLLM(TradingLLM):
             raw_response=payload,
             token_usage=usage,
         )
+
+    def chat(self, system: str, user: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        return response.choices[0].message.content or ""
 
 class OpenRouterTradingLLM(TradingLLM):
     provider = "openrouter"
@@ -235,6 +251,16 @@ class OpenRouterTradingLLM(TradingLLM):
             token_usage=usage,
         )
 
+    def chat(self, system: str, user: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        return response.choices[0].message.content or ""
+
 
 class GeminiTradingLLM(TradingLLM):
     provider = "gemini"
@@ -261,31 +287,34 @@ class GeminiTradingLLM(TradingLLM):
             token_usage=None,
         )
 
+    def chat(self, system: str, user: str) -> str:
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=f"{system}\n\nUser:\n{user}",
+        )
+        return response.text or ""
+
 
 class NvidiaTradingLLM(TradingLLM):
     provider = "nvidia"
 
     def __init__(self, api_key: str, model: str, base_url: str) -> None:
-        self.api_key = api_key
+        from openai import OpenAI
+
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
-        self.base_url = base_url
 
     def decide(self, context: dict) -> LLMResult:
-        import litellm
-
         try:
-            response = litellm.completion(
-                model=f"openai/{self.model}",  # Using openai/ prefix to ensure it uses the provided base_url correctly
+            response = self.client.chat.completions.create(
+                model=self.model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
                 ],
-                api_key=self.api_key,
-                base_url=self.base_url,
-                temperature=1,
-                top_p=0.95,
-                max_tokens=16384,
-                extra_body={"chat_template_kwargs": {"thinking": False}},
+                temperature=0.6,
+                top_p=0.9,
+                max_tokens=4096,
                 response_format={"type": "json_object"},
             )
         except Exception as exc:
@@ -301,7 +330,7 @@ class NvidiaTradingLLM(TradingLLM):
         content = response.choices[0].message.content or "{}"
         payload = json.loads(content)
         decision = _decision_or_hold(self.provider, self.model, payload)
-        usage = response.usage.model_dump() if hasattr(response, "usage") and response.usage else None
+        usage = response.usage.model_dump() if response.usage else None
         return LLMResult(
             provider=self.provider,
             model=self.model,
@@ -309,6 +338,19 @@ class NvidiaTradingLLM(TradingLLM):
             raw_response=payload,
             token_usage=usage,
         )
+
+    def chat(self, system: str, user: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.6,
+            top_p=0.9,
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content or ""
 
 
 def create_llm(settings: Settings) -> TradingLLM:

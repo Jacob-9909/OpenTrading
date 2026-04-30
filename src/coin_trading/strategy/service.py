@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from coin_trading.agents import create_trading_agent_graph
 from coin_trading.db.models import LLMDecision, SignalSide, TradeSignal
 from coin_trading.llm import TradingLLM
 from coin_trading.strategy.context import LLMContextBuilder
@@ -18,7 +19,21 @@ class StrategyService:
         latest_price: float,
     ) -> TradeSignal:
         context = self.context_builder.build(session, symbol, timeframe, latest_price)
-        llm_result = self.llm.decide(context)
+        
+        # Multi-Agent Workflow
+        print(f"\n🤖 [Multi-Agent] Starting AI debate for {symbol}...")
+        agent_graph = create_trading_agent_graph()
+        initial_state = {
+            "context": context,
+            "llm": self.llm,
+        }
+        final_state = agent_graph.invoke(initial_state)
+        llm_result = final_state["final_result"]
+        print("✅ [Multi-Agent] Debate concluded and Fund Manager made a decision.\n")
+        
+        # We append the multi-agent debate and reports to the context summary
+        prompt_summary = self.context_builder.summarize(context)
+        prompt_summary += "\n[Multi-Agent] Used Technical, Sentiment, and Researcher nodes."
         llm_decision = LLMDecision(
             provider=llm_result.provider,
             model=llm_result.model,

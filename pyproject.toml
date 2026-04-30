@@ -24,6 +24,7 @@ dependencies = [
     "streamlit",
     "tenacity",
     "typer",
+    "langgraph>=1.1.10",
 ]
 
 [project.optional-dependencies]

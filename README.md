@@ -3,8 +3,42 @@
 Batch-oriented Bitcoin LLM trading system for Bithumb spot trading.
 
 The first implementation runs in paper trading mode by default. It collects market/news context,
-computes technical indicators, asks an LLM for a structured BUY/SELL/HOLD decision, validates the
-decision with a risk engine, and records simulated orders/positions in PostgreSQL.
+computes technical indicators, and forwards them to a **Multi-Agent LangGraph System** for decision making.
+
+## 🤖 Multi-Agent LangGraph Architecture
+Instead of relying on a single LLM prompt, this project mimics a real-world investment firm using a multi-agent workflow:
+1. **Technical Analyst Agent**: Analyzes OHLCV charts and technical indicators.
+2. **Sentiment Analyst Agent**: Analyzes news feeds and market sentiment.
+3. **Researcher Debate**: "Bull" and "Bear" agents engage in a rigorous debate on the analyst reports, arguing for and against the trade.
+4. **Fund Manager Agent**: The final decision-maker. It reviews the debate, checks the portfolio/risk limits, and issues the final structured `BUY/SELL/HOLD` decision.
+
+This multi-agent approach significantly reduces LLM hallucination, mitigates directional bias, and ensures robust risk management.
+
+```mermaid
+graph TD
+    subgraph Data Layer
+        DB[(PostgreSQL)] --> Context[Context Builder]
+    end
+
+    subgraph LangGraph Multi-Agent Workflow
+        Context --> Tech[Technical Analyst Node]
+        Context --> Sent[Sentiment Analyst Node]
+        
+        Tech -- Technical Report --> Debate[Researcher Debate Node]
+        Sent -- Sentiment Report --> Debate
+        
+        Debate -- Bull & Bear Arguments --> Fund[Fund Manager Node]
+        Context -. Portfolio & Risk Limits .-> Fund
+    end
+
+    subgraph Execution Layer
+        Fund -- BUY / SELL / HOLD --> Exec[Execution Engine]
+        Exec --> Exchange((Bithumb Exchange))
+    end
+    
+    classDef agent fill:#f9f,stroke:#333,stroke-width:2px;
+    class Tech,Sent,Debate,Fund agent;
+```
 
 The LLM context includes recent compact candles, 30-day and 90-day market summaries, and
 multi-timeframe indicators for `1h`, `4h`, and `1d` by default.
