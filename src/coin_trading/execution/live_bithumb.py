@@ -4,7 +4,17 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
-from coin_trading.db.models import OrderSide, OrderStatus, PaperOrder, SignalSide, TradeSignal
+from coin_trading.db.models import (
+    OrderSide,
+    OrderStatus,
+    PaperOrder,
+    Position,
+    PositionSide,
+    PositionStatus,
+    SignalSide,
+    TradeSignal,
+    utc_now,
+)
 from coin_trading.exchange.bithumb import BithumbSpotClient
 from coin_trading.risk import RiskApproval
 
@@ -42,6 +52,23 @@ class BithumbLiveExecutor:
         )
         signal.status = "SUBMITTED"
         session.add(order)
+
+        # Shadow position tracking for P&L reporting (mirrors paper executor logic)
+        if signal.side == SignalSide.BUY:
+            position = Position(
+                symbol=signal.symbol,
+                side=PositionSide.SPOT,
+                quantity=approval.quantity,
+                entry_price=price,
+                mark_price=mark_price,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                leverage=1,
+            )
+            session.add(position)
+        elif signal.side == SignalSide.SELL:
+            self._close_spot_positions(session, signal.symbol, price)
+
         session.commit()
         session.refresh(order)
         return order
@@ -84,6 +111,20 @@ class BithumbLiveExecutor:
     @staticmethod
     def _order_side(signal_side: SignalSide) -> OrderSide:
         return OrderSide.BUY if signal_side == SignalSide.BUY else OrderSide.SELL
+
+    @staticmethod
+    def _close_spot_positions(session: Session, symbol: str, exit_price: float) -> None:
+        positions = (
+            session.query(Position)
+            .filter_by(symbol=symbol, status=PositionStatus.OPEN)
+            .all()
+        )
+        for position in positions:
+            position.mark_price = exit_price
+            position.realized_pnl = (exit_price - position.entry_price) * position.quantity
+            position.unrealized_pnl = 0
+            position.status = PositionStatus.CLOSED
+            position.closed_at = utc_now()
 
     def _reject(
         self,

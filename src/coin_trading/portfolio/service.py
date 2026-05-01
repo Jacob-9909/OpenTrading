@@ -4,7 +4,7 @@ from typing import Any, Protocol
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
-from coin_trading.db.models import Position, PositionSide, PositionStatus
+from coin_trading.db.models import AppState, Position, PositionSide, PositionStatus
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ class PortfolioService:
         if self.settings.portfolio_source == "exchange":
             if not symbol or mark_price is None:
                 raise ValueError("symbol and mark_price are required for exchange portfolio snapshots.")
-            return self._exchange_snapshot(symbol=symbol, mark_price=mark_price)
+            return self._exchange_snapshot(session=session, symbol=symbol, mark_price=mark_price)
         return self._paper_snapshot(session)
 
     def _paper_snapshot(self, session: Session) -> PortfolioSnapshot:
@@ -68,13 +68,14 @@ class PortfolioService:
             if open_positions
             else 0
         )
-        equity = self.settings.initial_equity + realized + unrealized
+        initial = self.settings.initial_equity or 0
+        equity = initial + realized + unrealized
         return PortfolioSnapshot(
             source="paper",
             equity=equity,
             realized_pnl=realized,
             unrealized_pnl=unrealized,
-            return_pct=(equity / self.settings.initial_equity - 1) * 100,
+            return_pct=(equity / initial - 1) * 100 if initial else 0,
             open_positions=len(open_positions),
             open_position_value=open_position_value,
             cash_available=max(equity - open_position_value, 0),
@@ -84,7 +85,7 @@ class PortfolioService:
             ),
         )
 
-    def _exchange_snapshot(self, symbol: str, mark_price: float) -> PortfolioSnapshot:
+    def _exchange_snapshot(self, session: Session, symbol: str, mark_price: float) -> PortfolioSnapshot:
         if self.account_client is None:
             raise RuntimeError("Exchange portfolio source requires an authenticated account client.")
 
@@ -102,17 +103,33 @@ class PortfolioService:
         open_position_value = base_total * mark_price
         equity = quote_total + open_position_value
 
+        # ── 기준 자산 자동 기록 (첫 실행 시 계좌 잔고를 baseline으로 저장) ─────
+        baseline_key = f"baseline_equity:{symbol}"
+        stored = AppState.get(session, baseline_key)
+        if stored is None:
+            AppState.set(session, baseline_key, str(equity))
+            baseline_equity = equity
+        else:
+            baseline_equity = float(stored)
+
         avg_buy_price = self._float(base.get("avg_buy_price"))
         unrealized = (mark_price - avg_buy_price) * base_total if avg_buy_price > 0 else 0
         position_return_pct = (
             (mark_price / avg_buy_price - 1) * 100 if avg_buy_price > 0 and base_total > 0 else 0
         )
+
+        # Accumulate realized P&L from shadow positions created by the live executor
+        realized_pnl = sum(
+            pos.realized_pnl
+            for pos in session.query(Position).filter_by(symbol=symbol, status=PositionStatus.CLOSED).all()
+        )
+
         return PortfolioSnapshot(
             source="exchange",
             equity=equity,
-            realized_pnl=0,
+            realized_pnl=realized_pnl,
             unrealized_pnl=unrealized,
-            return_pct=(equity / self.settings.initial_equity - 1) * 100,
+            return_pct=(equity / baseline_equity - 1) * 100 if baseline_equity else 0,
             open_positions=1 if base_total > 0 else 0,
             open_position_value=open_position_value,
             cash_available=quote_balance,

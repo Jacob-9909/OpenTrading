@@ -148,7 +148,8 @@ class RiskEngine:
         if open_positions >= self.settings.max_open_positions:
             return "Maximum open positions reached."
         daily_loss = self._daily_realized_loss(session, signal.symbol)
-        if daily_loss <= -(self.settings.initial_equity * self.settings.daily_max_loss):
+        current_equity = self._current_equity(session, signal.symbol, mark_price)
+        if current_equity > 0 and daily_loss <= -(current_equity * self.settings.daily_max_loss):
             return "Daily max loss limit reached."
         if signal.confidence < 0.5:
             return "Signal confidence is below minimum threshold."

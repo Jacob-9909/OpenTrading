@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, Uniqu
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Session
 
 from coin_trading.db.session import Base
 
@@ -172,3 +173,28 @@ class RiskEvent(Base):
     message: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AppState(Base):
+    """Key-value store for persistent application state (e.g. baseline_equity)."""
+
+    __tablename__ = "app_state"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    @classmethod
+    def get(cls, session: Session, key: str) -> str | None:
+        row = session.get(cls, key)
+        return row.value if row else None
+
+    @classmethod
+    def set(cls, session: Session, key: str, value: str) -> None:
+        row = session.get(cls, key)
+        if row is None:
+            session.add(cls(key=key, value=value))
+        else:
+            row.value = value
+            row.updated_at = utc_now()
+        session.commit()

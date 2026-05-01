@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     live_order_type: Literal["limit", "market"] = "limit"
     live_min_order_krw: float = Field(default=5_000, gt=0)
     live_max_order_krw: float = Field(default=100_000, gt=0)
-    exchange: Literal["bithumb_spot", "binance_futures"] = "bithumb_spot"
+    exchange: Literal["bithumb_spot", "binance_futures", "yfinance"] = "bithumb_spot"
     symbol: str = "KRW-BTC"
     timeframe: str = "1h"
     lookback_limit: int = Field(default=200, ge=50, le=1500)
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     dashboard_chart_timeframe: str = "10m"
     dashboard_chart_days: int = Field(default=10, ge=1, le=90)
 
-    initial_equity: float = Field(default=10_000, gt=0)
+    initial_equity: float | None = Field(default=None, gt=0)
     risk_per_trade: float = Field(default=0.01, gt=0, le=0.10)
     daily_max_loss: float = Field(default=0.03, gt=0, le=0.50)
     max_leverage: int = Field(default=3, ge=1, le=125)

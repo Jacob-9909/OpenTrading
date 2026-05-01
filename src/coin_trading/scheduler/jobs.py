@@ -156,21 +156,21 @@ class TradingPipeline:
     def serve(self) -> None:
         scheduler = BlockingScheduler(timezone=self.settings.scheduler_timezone)
         scheduler.add_job(
-            self.refresh_data_once,
+            self._safe_refresh,
             "interval",
             minutes=self.settings.data_refresh_interval_minutes,
             next_run_time=None,
         )
         for decision_time in self.settings.decision_times:
             hour, minute = self._parse_decision_time(decision_time)
-            scheduler.add_job(self.decide_once, "cron", hour=hour, minute=minute)
-        self.refresh_data_once()
+            scheduler.add_job(self._safe_decide, "cron", hour=hour, minute=minute)
+        self._safe_refresh()
         scheduler.start()
 
     def serve_decisions(self) -> None:
         scheduler = BlockingScheduler(timezone=self.settings.scheduler_timezone)
         scheduler.add_job(
-            self.decide_once,
+            self._safe_decide,
             "interval",
             minutes=self.settings.decision_interval_minutes,
             next_run_time=datetime.now(ZoneInfo(self.settings.scheduler_timezone)),
@@ -292,13 +292,29 @@ class TradingPipeline:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+    def _safe_refresh(self) -> None:
+        try:
+            self.refresh_data_once()
+        except Exception as exc:
+            print(f"[refresh] ERROR (continuing): {exc.__class__.__name__}: {exc}")
+
+    def _safe_decide(self) -> None:
+        try:
+            self.decide_once()
+        except Exception as exc:
+            print(f"[decide] ERROR (continuing): {exc.__class__.__name__}: {exc}")
+
     def _run_once_with_log(self) -> None:
         started_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
         print(f"[serve-run-once] cycle start: {started_at}")
-        result = self.run_once()
-        ended_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
-        print(
-            "[serve-run-once] cycle end: "
-            f"{ended_at} | signal={result.signal_id}:{result.signal_status} "
-            f"order={result.order_id} risk='{result.risk_reason}'"
-        )
+        try:
+            result = self.run_once()
+            ended_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
+            print(
+                "[serve-run-once] cycle end: "
+                f"{ended_at} | signal={result.signal_id}:{result.signal_status} "
+                f"order={result.order_id} risk='{result.risk_reason}'"
+            )
+        except Exception as exc:
+            ended_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
+            print(f"[serve-run-once] cycle ERROR at {ended_at}: {exc.__class__.__name__}: {exc}")

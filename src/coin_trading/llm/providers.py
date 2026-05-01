@@ -7,15 +7,17 @@ from coin_trading.config import Settings
 from coin_trading.strategy.schemas import LLMResult, TradingDecision
 
 
-SYSTEM_PROMPT = """You are a senior spot crypto Fund Manager.
+_SYSTEM_PROMPT_CRYPTO = """You are a senior spot crypto Fund Manager.
 Review the multi_agent_insights (Technical, Sentiment, and Researcher debates) along with portfolio context.
+
 Scope and trading mode:
-- This system trades Bithumb spot only. Allowed actions are BUY, SELL, HOLD.
+- This is a paper trading simulation. No real money is at risk.
+- Exchange: spot crypto (Bithumb or similar). Allowed actions are BUY, SELL, HOLD.
 - Never propose futures assumptions, short selling, or liquidation-based reasoning.
 - This is a batch decision engine, not a scalping bot.
 
 Core objective:
-- Preserve capital first, then seek asymmetric opportunities.
+- Preserve virtual capital first, then seek asymmetric opportunities.
 - Prefer HOLD when signal quality is weak, market context is conflicting, or risk is unclear.
 
 Decision process (follow in this order):
@@ -43,6 +45,57 @@ Conservative behavior defaults:
 - If data quality is insufficient or contradictory, return HOLD.
 - Do not fabricate unavailable facts.
 """
+
+_SYSTEM_PROMPT_STOCK = """You are a senior stock market paper trading analyst.
+
+Scope and trading mode:
+- This is a paper trading simulation for stock market investments. No real money is at risk.
+- Allowed actions are BUY, SELL, HOLD. This is a long-only strategy — no short selling.
+- This is a batch swing-trading decision engine, not a scalping bot.
+
+Core objective:
+- Preserve virtual capital first, then seek asymmetric return opportunities.
+- Prefer HOLD when signal quality is weak, market context is conflicting, or risk is unclear.
+
+Decision process (follow in this order):
+1) Regime check: determine trend direction, volatility regime, sector momentum, and news sentiment.
+2) Technical alignment: use multi-timeframe indicators (daily + hourly) for confirmation.
+3) Portfolio fit: consider current exposure, cash available, and position concentration.
+4) Risk design: set realistic stop_loss and take_profit based on ATR and support/resistance.
+5) Final action: choose BUY, SELL, or HOLD with confidence grounded in evidence.
+
+Risk and sizing constraints:
+- Use portfolio.current_equity and portfolio.cash_available when reasoning about allocation_pct.
+- Never set allocation_pct above portfolio.max_position_allocation_pct.
+- If uncertainty is elevated, reduce allocation or choose HOLD.
+- leverage must always be 1 (no leverage in stock paper trading).
+- For BUY, enforce stop_loss < entry_price < take_profit.
+- For SELL (closing a long position), enforce take_profit < entry_price < stop_loss.
+
+Output contract (critical):
+- Return only one valid JSON object with these keys:
+  action, confidence, entry_price, stop_loss, take_profit, allocation_pct, leverage, time_horizon, rationale, risk_notes
+- confidence must be a number between 0 and 1.
+- leverage must always be 1.
+- risk_notes must always be an array of strings (never a single string).
+- rationale must be concise and evidence-based, referencing market/indicator context.
+- For HOLD, omit price fields or set them to null.
+
+Conservative behavior defaults:
+- If data quality is insufficient or contradictory, return HOLD.
+- Do not fabricate unavailable facts.
+"""
+
+
+def get_system_prompt(exchange: str) -> str:
+    """Return the appropriate system prompt based on the configured exchange."""
+    if exchange == "yfinance":
+        return _SYSTEM_PROMPT_STOCK
+    return _SYSTEM_PROMPT_CRYPTO
+
+
+# Default kept for backward compatibility with existing tests
+SYSTEM_PROMPT = _SYSTEM_PROMPT_CRYPTO
 
 
 class TradingLLM(ABC):
@@ -174,10 +227,11 @@ class OpenAITradingLLM(TradingLLM):
         self.model = model
 
     def decide(self, context: dict) -> LLMResult:
+        system_prompt = get_system_prompt(context.get("exchange", "bithumb_spot"))
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
             ],
             response_format={"type": "json_object"},
@@ -221,11 +275,12 @@ class OpenRouterTradingLLM(TradingLLM):
         self.model = model
 
     def decide(self, context: dict) -> LLMResult:
+        system_prompt = get_system_prompt(context.get("exchange", "bithumb_spot"))
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
                 ],
                 response_format={"type": "json_object"},
@@ -272,9 +327,10 @@ class GeminiTradingLLM(TradingLLM):
         self.model = model
 
     def decide(self, context: dict) -> LLMResult:
+        system_prompt = get_system_prompt(context.get("exchange", "bithumb_spot"))
         response = self.client.models.generate_content(
             model=self.model,
-            contents=f"{SYSTEM_PROMPT}\n\nContext:\n{json.dumps(context, ensure_ascii=False)}",
+            contents=f"{system_prompt}\n\nContext:\n{json.dumps(context, ensure_ascii=False)}",
             config={"response_mime_type": "application/json"},
         )
         payload = json.loads(response.text or "{}")
@@ -305,11 +361,13 @@ class NvidiaTradingLLM(TradingLLM):
         self.model = model
 
     def decide(self, context: dict) -> LLMResult:
+        system_prompt = get_system_prompt(context.get("exchange", "bithumb_spot"))
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
                 ],
                 temperature=0.6,

@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
-from coin_trading.db.models import IndicatorSnapshot, MarketCandle, NewsItem
+from coin_trading.db.models import AppState, IndicatorSnapshot, MarketCandle, NewsItem
 from coin_trading.portfolio import PortfolioService
 
 
@@ -39,7 +39,7 @@ class LLMContextBuilder:
 
         return {
             "symbol": symbol,
-            "exchange": "bithumb_spot" if "-" in symbol else "binance_futures",
+            "exchange": self.settings.exchange,
             "timeframe": timeframe,
             "latest_price": latest_price,
             "latest_candle": self._candle_payload(latest_candle) if latest_candle else None,
@@ -221,9 +221,15 @@ class LLMContextBuilder:
             symbol=symbol,
             mark_price=latest_price,
         )
+        # exchange 모드: DB에서 baseline 조회 / paper 모드: settings 값 사용
+        if self.settings.portfolio_source == "exchange":
+            stored = AppState.get(session, f"baseline_equity:{symbol}")
+            baseline = float(stored) if stored else snapshot.equity
+        else:
+            baseline = self.settings.initial_equity or snapshot.equity
         return {
             "source": snapshot.source,
-            "initial_equity": round(self.settings.initial_equity, 8),
+            "initial_equity": round(baseline, 8),
             "current_equity": round(snapshot.equity, 8),
             "cash_available": round(snapshot.cash_available, 8),
             "open_position_value": round(snapshot.open_position_value, 8),
