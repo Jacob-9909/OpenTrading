@@ -8,9 +8,26 @@ cli = typer.Typer(help="Batch Bithumb spot LLM trading system.")
 
 
 @cli.command("init-db")
-def init_database() -> None:
-    init_db()
-    typer.echo("Database tables are ready.")
+def init_database(
+    reset: bool = typer.Option(
+        False,
+        "--reset",
+        help="모든 데이터를 삭제하고 테이블을 재생성합니다 (구조 유지, 데이터 초기화).",
+    ),
+) -> None:
+    if reset:
+        settings = get_settings()
+        if settings.trading_mode == "live":
+            typer.confirm(
+                "⚠️  실제 코인(LIVE) 모드입니다. 모든 거래 기록이 삭제됩니다. 계속하시겠습니까?",
+                abort=True,
+            )
+        from coin_trading.db import reset_db
+        reset_db()
+        typer.echo("✅ 모든 데이터가 초기화되고 테이블이 재생성되었습니다.")
+    else:
+        init_db()
+        typer.echo("Database tables are ready.")
 
 
 @cli.command("run-once")

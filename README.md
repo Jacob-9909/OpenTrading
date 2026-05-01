@@ -287,3 +287,40 @@ uv run python -m pytest
 uv run alembic revision --autogenerate -m "describe change"
 uv run alembic upgrade head
 ```
+
+---
+
+## 백그라운드 실행 (macOS)
+
+Mac에서 터미널을 닫아도 24시간 트레이딩을 유지하고 싶다면 `launchd`를 사용하세요.
+
+### 1. 서비스 등록
+```bash
+# 서비스 로드 및 시작
+launchctl load ~/Library/LaunchAgents/com.jacob.cointrading.plist
+
+# 상태 확인 (PID가 나오면 정상)
+launchctl list | grep cointrading
+```
+
+### 2. 로그 모니터링
+AI의 결정이나 오류 발생 여부를 실시간으로 확인할 수 있습니다.
+```bash
+# 정상 출력 로그
+tail -f ~/Develop/CoinTrading/logs/stdout.log
+
+# 에러 로그
+tail -f ~/Develop/CoinTrading/logs/stderr.log
+```
+
+### 3. 서비스 중지 및 삭제
+```bash
+# 중지
+launchctl unload ~/Library/LaunchAgents/com.jacob.cointrading.plist
+
+# 자동 실행 설정 삭제
+rm ~/Library/LaunchAgents/com.jacob.cointrading.plist
+```
+
+> [!IMPORTANT]
+> **주의**: 맥북 덮개를 닫으면 시스템이 잠자기 모드로 들어가며 트레이딩이 중단됩니다. 덮개를 닫고도 실행하려면 전원을 연결하고 외부 모니터를 사용(클램쉘 모드)하거나, `Amphetamine` 같은 앱으로 잠자기를 방지해야 합니다.

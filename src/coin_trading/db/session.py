@@ -27,6 +27,14 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+def reset_db() -> None:
+    """모든 테이블 데이터를 삭제하고 테이블을 재생성합니다."""
+    from coin_trading.db import models  # noqa: F401
+
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+
 def get_session() -> Iterator[Session]:
     session = SessionLocal()
     try:
