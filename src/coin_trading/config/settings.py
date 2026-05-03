@@ -68,9 +68,9 @@ class Settings(BaseSettings):
     scheduler_timezone: str = "Asia/Seoul"
     decision_times: list[str] = Field(default_factory=lambda: ["09:00"])
     decision_interval_minutes: int = Field(default=60, ge=1)
-    decision_cooldown_minutes: int = Field(default=1440, ge=0)
+    decision_cooldown_minutes: int = Field(default=0, ge=0)
     max_data_staleness_minutes: int = Field(default=30, ge=1)
-    reentry_cooldown_minutes: int = Field(default=60, ge=0)
+    reentry_cooldown_minutes: int = Field(default=0, ge=0)
     trailing_stop_pct: float | None = Field(default=None, gt=0, le=0.5)
 
     @field_validator("news_rss_urls", "analysis_timeframes", "decision_times", mode="before")
