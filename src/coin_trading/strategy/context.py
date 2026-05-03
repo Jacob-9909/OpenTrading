@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
-from coin_trading.db.models import AppState, IndicatorSnapshot, MarketCandle, NewsItem
+from coin_trading.db.models import AppState, IndicatorSnapshot, MarketCandle, NewsItem, Position, PositionStatus
 from coin_trading.portfolio import PortfolioService
 
 
@@ -36,6 +36,9 @@ class LLMContextBuilder:
         )
         indicators = self._latest_indicators(session, symbol, timeframe)
         news = session.query(NewsItem).order_by(NewsItem.collected_at.desc()).limit(news_limit).all()
+        snapshot = PortfolioService(self.settings, self.account_client).snapshot(
+            session, symbol=symbol, mark_price=latest_price
+        )
 
         return {
             "symbol": symbol,
@@ -51,7 +54,7 @@ class LLMContextBuilder:
             ),
             "monthly_summary": self._market_summary(session, symbol=symbol, days=30),
             "quarter_summary": self._market_summary(session, symbol=symbol, days=90),
-            "portfolio": self._portfolio_payload(session, symbol=symbol, latest_price=latest_price),
+            "portfolio": self._portfolio_payload(session, symbol=symbol, latest_price=latest_price, snapshot=snapshot),
             "technical_indicators": indicators.values if indicators else {},
             "multi_timeframe": self._multi_timeframe_indicators(session, symbol),
             "news": [
@@ -63,12 +66,7 @@ class LLMContextBuilder:
                 }
                 for item in news
             ],
-            "instructions": (
-                "Return one JSON object only. action must be BUY, SELL, or HOLD for spot markets. "
-                "For BUY/SELL include entry_price, stop_loss, take_profit, leverage, confidence, "
-                "allocation_pct, rationale, and risk_notes. allocation_pct is the percent of "
-                "current equity to allocate, and it must not exceed portfolio.max_position_allocation_pct."
-            ),
+            "instructions": self._position_instructions(snapshot),
         }
 
     @staticmethod
@@ -215,18 +213,67 @@ class LLMContextBuilder:
     def _round_pct(value: float) -> float:
         return round(value * 100, 4)
 
-    def _portfolio_payload(self, session: Session, symbol: str, latest_price: float) -> dict:
-        snapshot = PortfolioService(self.settings, self.account_client).snapshot(
-            session,
-            symbol=symbol,
-            mark_price=latest_price,
+    @staticmethod
+    def _position_instructions(snapshot: Any) -> str:
+        has_position = snapshot.base_asset_quantity > 0
+        if has_position:
+            return (
+                "CURRENT STATE: Open position. Pipeline re-evaluates every ~10 minutes; typical holding window is 2-8 hours. "
+                "Valid actions: SELL (exit) or HOLD (maintain). Never BUY on top of an existing position. "
+                "SELL when take_profit is hit, trend has flipped on the main timeframe, "
+                "stop_loss is approaching (within 0.3× ATR), OR the position has been open well past the holding window without progress. "
+                "HOLD when the entry thesis is still alive (trend intact, momentum positive, no immediate resistance) — "
+                "give the trade the 2-8h window to play out. Minor pullbacks inside the original stop are noise, not exit signals. "
+                "Return one JSON object with: action, confidence, entry_price, stop_loss, take_profit, "
+                "allocation_pct, leverage, time_horizon, rationale, risk_notes."
+            )
+        return (
+            "CURRENT STATE: No open position. Cash available. The pipeline may run every few minutes (~8–10m); "
+            "intraday holds are often 2–8h but the entry bar is relaxed for short cadence. "
+            "Valid actions: BUY (enter) or HOLD (wait). Never SELL with no position. "
+            "BUY when: (1) not a clear bear breakdown (bullish trend OR price near/above SMA_50 OR sideways without fresh breakdown) AND "
+            "(2) R/R ≥ 1.2:1 with a plausible stop, AND at least 1 of: RSI 25–80 / momentum not hostile, "
+            "volume_ratio ≥ 0.40 (only skip fresh entry if volume_ratio < 0.12), "
+            "Bull verdict WEAK+ unless Bear STRONG vs Bull WEAK. Use BUY confidence ≥ 0.50. "
+            "HOLD when clearly bearish+momentum down, unusable data, or R/R cannot reach 1.2:1. "
+            "On acceptable setups prefer modest BUY over endless HOLD. "
+            "Return one JSON object with: action, confidence, entry_price, stop_loss, take_profit, "
+            "allocation_pct, leverage, time_horizon, rationale, risk_notes."
         )
+
+    def _portfolio_payload(self, session: Session, symbol: str, latest_price: float, snapshot: Any = None) -> dict:
+        from datetime import datetime, timezone
+        if snapshot is None:
+            snapshot = PortfolioService(self.settings, self.account_client).snapshot(
+                session, symbol=symbol, mark_price=latest_price
+            )
         # exchange 모드: DB에서 baseline 조회 / paper 모드: settings 값 사용
         if self.settings.portfolio_source == "exchange":
             stored = AppState.get(session, f"baseline_equity:{symbol}")
             baseline = float(stored) if stored else snapshot.equity
         else:
             baseline = self.settings.initial_equity or snapshot.equity
+        now = datetime.now(timezone.utc)
+        open_positions = (
+            session.query(Position)
+            .filter_by(symbol=symbol, status=PositionStatus.OPEN)
+            .all()
+        )
+        position_details = []
+        for pos in open_positions:
+            opened = pos.opened_at
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=timezone.utc)
+            holding_minutes = int((now - opened).total_seconds() / 60)
+            entry = round(pos.entry_price, 8)
+            unrealized_pnl_pct = round((latest_price - entry) / entry * 100, 4) if entry > 0 else 0
+            position_details.append({
+                "entry_price": entry,
+                "stop_loss": round(pos.stop_loss, 8) if pos.stop_loss is not None else None,
+                "take_profit": round(pos.take_profit, 8) if pos.take_profit is not None else None,
+                "unrealized_pnl_pct": unrealized_pnl_pct,
+                "holding_minutes": holding_minutes,
+            })
         return {
             "source": snapshot.source,
             "initial_equity": round(baseline, 8),
@@ -240,6 +287,7 @@ class LLMContextBuilder:
             "unrealized_pnl": round(snapshot.unrealized_pnl, 8),
             "return_pct": round(snapshot.return_pct, 4),
             "open_positions": snapshot.open_positions,
+            "open_position_details": position_details,
             "max_risk_per_trade_pct": round(self.settings.risk_per_trade * 100, 4),
             "max_position_allocation_pct": round(self.settings.max_position_allocation_pct, 4),
         }

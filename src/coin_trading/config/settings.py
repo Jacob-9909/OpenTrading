@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     risk_per_trade: float = Field(default=0.01, gt=0, le=0.10)
     daily_max_loss: float = Field(default=0.03, gt=0, le=0.50)
     max_leverage: int = Field(default=3, ge=1, le=125)
-    max_open_positions: int = Field(default=1, ge=1, le=10)
+    max_open_positions: int = Field(default=1, ge=1, le=20)
     max_position_allocation_pct: float = Field(default=30.0, gt=0, le=100)
     liquidation_buffer: float = Field(default=0.08, gt=0, le=0.50)
     kill_switch_drawdown: float = Field(default=0.10, gt=0, le=0.90)
@@ -69,7 +69,9 @@ class Settings(BaseSettings):
     decision_times: list[str] = Field(default_factory=lambda: ["09:00"])
     decision_interval_minutes: int = Field(default=60, ge=1)
     decision_cooldown_minutes: int = Field(default=1440, ge=0)
-    max_data_staleness_minutes: int = Field(default=180, ge=1)
+    max_data_staleness_minutes: int = Field(default=30, ge=1)
+    reentry_cooldown_minutes: int = Field(default=60, ge=0)
+    trailing_stop_pct: float | None = Field(default=None, gt=0, le=0.5)
 
     @field_validator("news_rss_urls", "analysis_timeframes", "decision_times", mode="before")
     @classmethod

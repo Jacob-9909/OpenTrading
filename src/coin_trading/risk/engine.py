@@ -1,11 +1,12 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
 from coin_trading.db.models import (
+    AppState,
     Position,
     PositionSide,
     PositionStatus,
@@ -96,6 +97,10 @@ class RiskEngine:
         for position in positions:
             position.mark_price = mark_price
             position.unrealized_pnl = self._unrealized_pnl(position, mark_price)
+            if self.settings.trailing_stop_pct and position.side in {PositionSide.LONG, PositionSide.SPOT}:
+                new_stop = round(mark_price * (1 - self.settings.trailing_stop_pct), 8)
+                if position.stop_loss is None or new_stop > position.stop_loss:
+                    position.stop_loss = new_stop
             if self._hit_stop_loss(position, mark_price):
                 events.append(self._event(symbol, RiskEventType.STOP_LOSS, "Stop loss reached.", position))
             elif self._hit_take_profit(position, mark_price):
@@ -146,13 +151,22 @@ class RiskEngine:
                 return "No open spot position to sell."
             return None
         if open_positions >= self.settings.max_open_positions:
-            return "Maximum open positions reached."
+            # One symbol = one spot balance; additional BUYs merge into the existing OPEN row
+            # (see PaperExecutor / BithumbLiveExecutor). Do not block pyramiding on row count.
+            if not (
+                self.settings.exchange == "bithumb_spot" and signal.side == SignalSide.BUY
+            ):
+                return "Maximum open positions reached."
         daily_loss = self._daily_realized_loss(session, signal.symbol)
         current_equity = self._current_equity(session, signal.symbol, mark_price)
         if current_equity > 0 and daily_loss <= -(current_equity * self.settings.daily_max_loss):
             return "Daily max loss limit reached."
-        if signal.confidence < 0.5:
-            return "Signal confidence is below minimum threshold."
+        if signal.side == SignalSide.BUY and self._kill_switch_active(session, signal.symbol, mark_price):
+            return f"Kill switch: portfolio drawdown exceeds {self.settings.kill_switch_drawdown:.0%}."
+        if self._reentry_cooldown_active(session, signal):
+            return f"Re-entry cooldown: {self.settings.reentry_cooldown_minutes}m after last SELL."
+        if signal.confidence < 0.50:
+            return "Signal confidence is below minimum threshold (0.50)."
         return None
 
     def _position_quantity(
@@ -275,6 +289,33 @@ class RiskEngine:
             message=message,
             payload={"position_id": position.id, "mark_price": position.mark_price},
         )
+
+    def _kill_switch_active(self, session: Session, symbol: str, mark_price: float) -> bool:
+        if self.settings.portfolio_source == "exchange":
+            stored = AppState.get(session, f"baseline_equity:{symbol}")
+            baseline = float(stored) if stored else None
+        else:
+            baseline = self.settings.initial_equity
+        if not baseline or baseline <= 0:
+            return False
+        current = self._current_equity(session, symbol, mark_price)
+        return (current - baseline) / baseline <= -self.settings.kill_switch_drawdown
+
+    def _reentry_cooldown_active(self, session: Session, signal: TradeSignal) -> bool:
+        if self.settings.reentry_cooldown_minutes <= 0 or signal.side != SignalSide.BUY:
+            return False
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.settings.reentry_cooldown_minutes)
+        recent_sell = (
+            session.query(TradeSignal)
+            .filter(
+                TradeSignal.symbol == signal.symbol,
+                TradeSignal.side == SignalSide.SELL,
+                TradeSignal.created_at >= cutoff,
+                TradeSignal.status.notin_(["PENDING", "REJECTED"]),
+            )
+            .first()
+        )
+        return recent_sell is not None
 
     def _position_side(self, signal_side: SignalSide) -> PositionSide:
         if signal_side == SignalSide.SELL:

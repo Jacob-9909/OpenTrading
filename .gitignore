@@ -48,3 +48,5 @@ logs/
 
 # Alembic
 # (migrations folder is tracked, but not generated files if any)
+# Added by code-review-graph
+.code-review-graph/

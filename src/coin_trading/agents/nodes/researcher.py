@@ -19,7 +19,11 @@ def researcher_debate_node(state: AgentState) -> dict:
     print("="*50 + "\n")
     
     print("   -> [Node] Bearish Researcher is attacking arguments...")
-    bear_arg = llm.chat(BEAR_RESEARCHER_SYSTEM_PROMPT, bull_prompt)
+    bear_prompt = (
+        f"Technical Report:\n{tech}\n\nSentiment Report:\n{sent}\n\n"
+        f"Bull Argument (rebut this):\n{bull_arg}"
+    )
+    bear_arg = llm.chat(BEAR_RESEARCHER_SYSTEM_PROMPT, bear_prompt)
     print("\n" + "="*50)
     print("🐻 [BEAR ARGUMENT]")
     print("="*50)

@@ -6,7 +6,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
-from coin_trading.db.models import MarketCandle, TradeSignal
+from coin_trading.db.models import MarketCandle, Position, PositionStatus, RiskEventType, TradeSignal
+from coin_trading.execution.live_bithumb import BithumbLiveExecutor
 from coin_trading.db.session import SessionLocal
 from coin_trading.exchange import create_exchange_client
 from coin_trading.execution import create_executor
@@ -121,7 +122,11 @@ class TradingPipeline:
                     risk_reason=duplicate_reason,
                 )
 
-            self.risk.monitor_open_positions(session, latest_price, self.settings.symbol)
+            if isinstance(self.executor, BithumbLiveExecutor):
+                self.executor.reconcile_submitted_orders(session, self.settings.symbol)
+            events = self.risk.monitor_open_positions(session, latest_price, self.settings.symbol)
+            if self.settings.trading_mode != "signal_only":
+                self._execute_risk_exits(session, events, latest_price)
             signal = self.strategy.create_signal(
                 session,
                 symbol=self.settings.symbol,
@@ -191,6 +196,18 @@ class TradingPipeline:
             f"timezone={self.settings.scheduler_timezone})"
         )
         scheduler.start()
+
+    def _execute_risk_exits(self, session: Session, events: list, mark_price: float) -> None:
+        for event in events:
+            if event.event_type not in {RiskEventType.STOP_LOSS, RiskEventType.TAKE_PROFIT}:
+                continue
+            position_id = (event.payload or {}).get("position_id")
+            if not position_id:
+                continue
+            position = session.get(Position, position_id)
+            if position and position.status == PositionStatus.OPEN:
+                self.executor.emergency_exit(session, position, mark_price, event.message)
+                print(f"[risk] AUTO EXIT {event.event_type} {event.symbol} @ {mark_price}")
 
     def _collection_timeframes(self) -> list[str]:
         timeframes = [self.settings.timeframe, *self.settings.analysis_timeframes, "1d"]

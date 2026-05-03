@@ -110,7 +110,8 @@ def main() -> None:
                         )
                     ]
                 )
-                order_df = _orders_in_range(orders, candle_df["time"].min(), candle_df["time"].max())
+                candle_duration = pd.Timedelta(minutes=_timeframe_minutes(chart_timeframe))
+                order_df = _orders_in_range(orders, candle_df["time"].min(), candle_df["time"].max() + candle_duration)
                 if not order_df.empty:
                     buy_df = order_df[order_df["side"] == "BUY"]
                     sell_df = order_df[order_df["side"] == "SELL"]

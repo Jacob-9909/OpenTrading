@@ -133,6 +133,18 @@ class BithumbSpotClient:
             }
         )
 
+    def get_order(self, order_id: str) -> dict[str, Any]:
+        params = {"uuid": order_id}
+        query = self._query_string(params)
+        response = httpx.get(
+            f"{self.base_url}/v1/order",
+            params=params,
+            headers=self._auth_headers(query),
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def cancel_order(self, order_id: str) -> dict[str, Any]:
         params = {"order_id": order_id}
         query = self._query_string(params)

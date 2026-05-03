@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from coin_trading.config import Settings
-from coin_trading.db.models import SignalSide, TradeSignal
+from coin_trading.db.models import Position, PositionSide, PositionStatus, SignalSide, TradeSignal
 from coin_trading.db.session import Base
 from coin_trading.risk import RiskEngine
 
@@ -20,8 +20,14 @@ class FakeSession:
     def count(self):
         return 0
 
+    def first(self):
+        return None
+
     def all(self):
         return []
+
+    def get(self, _model, _id):
+        return None
 
     def add(self, _model):
         return None
@@ -133,3 +139,47 @@ def test_risk_engine_uses_exchange_available_balance_for_spot_sell() -> None:
 
     assert approval.approved is True
     assert approval.quantity == 0.01
+
+
+def test_risk_engine_allows_second_bithumb_spot_buy_when_max_open_is_one() -> None:
+    """Spot adds merge into one OPEN row; risk must not reject BUY for row-count alone."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    session.add(
+        Position(
+            symbol="KRW-BTC",
+            side=PositionSide.SPOT,
+            status=PositionStatus.OPEN,
+            quantity=0.001,
+            entry_price=100_000_000.0,
+            mark_price=100_000_000.0,
+            leverage=1,
+        )
+    )
+    session.commit()
+    settings = Settings(
+        portfolio_source="paper",
+        exchange="bithumb_spot",
+        symbol="KRW-BTC",
+        max_open_positions=1,
+        initial_equity=200_000_000.0,
+    )
+    signal = TradeSignal(
+        symbol="KRW-BTC",
+        side=SignalSide.BUY,
+        confidence=0.8,
+        entry_price=100_000_000.0,
+        stop_loss=98_000_000.0,
+        take_profit=105_000_000.0,
+        leverage=1,
+        rationale="add-on buy",
+    )
+    signal.allocation_pct = 10
+    session.add(signal)
+    session.commit()
+
+    approval = RiskEngine(settings).evaluate(session, signal, mark_price=100_000_000.0)
+
+    assert approval.approved is True
+    assert approval.quantity > 0

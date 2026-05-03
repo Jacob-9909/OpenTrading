@@ -114,7 +114,56 @@ def test_openrouter_normalizes_string_risk_notes() -> None:
     assert result.decision.risk_notes == ["single note"]
 
 
-def test_system_prompt_enforces_hold_bias_and_risk_notes_array() -> None:
-    assert "Prefer HOLD when signal quality is weak" in SYSTEM_PROMPT
-    assert "risk_notes must always be an array of strings" in SYSTEM_PROMPT
+def test_openrouter_normalizes_null_time_horizon() -> None:
+    payload = {
+        "action": "BUY",
+        "confidence": 0.8,
+        "entry_price": 100,
+        "stop_loss": 95,
+        "take_profit": 110,
+        "allocation_pct": 10,
+        "leverage": 1,
+        "time_horizon": None,
+        "rationale": "valid",
+        "risk_notes": [],
+    }
+    llm = object.__new__(OpenRouterTradingLLM)
+    llm.client = FakeClientWithPayload(payload)
+    llm.model = "google/gemma-4-31b-it:free"
+
+    result = llm.decide({"latest_price": 100})
+
+    assert result.decision.action == "BUY"
+    assert result.decision.time_horizon == "batch"
+
+
+def test_openrouter_normalizes_blank_time_horizon() -> None:
+    payload = {
+        "action": "BUY",
+        "confidence": 0.8,
+        "entry_price": 100,
+        "stop_loss": 95,
+        "take_profit": 110,
+        "allocation_pct": 10,
+        "leverage": 1,
+        "time_horizon": "   ",
+        "rationale": "valid",
+        "risk_notes": [],
+    }
+    llm = object.__new__(OpenRouterTradingLLM)
+    llm.client = FakeClientWithPayload(payload)
+    llm.model = "google/gemma-4-31b-it:free"
+
+    result = llm.decide({"latest_price": 100})
+
+    assert result.decision.action == "BUY"
+    assert result.decision.time_horizon == "batch"
+
+
+def test_system_prompt_enforces_position_aware_rules_and_risk_notes_array() -> None:
+    assert "base_asset_quantity" in SYSTEM_PROMPT
+    assert "risk_notes" in SYSTEM_PROMPT
+    assert "array of strings" in SYSTEM_PROMPT
     assert "Never set allocation_pct above portfolio.max_position_allocation_pct." in SYSTEM_PROMPT
+    assert "take_profit < entry_price < stop_loss" in SYSTEM_PROMPT
+    assert "never null" in SYSTEM_PROMPT.lower()

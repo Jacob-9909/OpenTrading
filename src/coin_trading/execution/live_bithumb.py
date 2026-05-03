@@ -30,7 +30,9 @@ class BithumbLiveExecutor:
         signal: TradeSignal,
         approval: RiskApproval,
         mark_price: float,
-    ) -> PaperOrder:
+    ) -> PaperOrder | None:
+        if signal.side == SignalSide.HOLD:
+            return None
         if not approval.approved or approval.quantity <= 0:
             return self._reject(session, signal, approval.reason, mark_price)
 
@@ -39,14 +41,14 @@ class BithumbLiveExecutor:
             return self._reject(session, signal, safety_rejection, mark_price)
 
         side = self._order_side(signal.side)
-        price = signal.entry_price or mark_price
-        response = self._place_order(signal, approval.quantity, price)
+        order_price = signal.entry_price or mark_price
+        response = self._place_order(signal, approval.quantity, order_price)
         order = PaperOrder(
             trade_signal_id=signal.id,
             symbol=signal.symbol,
             side=side,
             quantity=approval.quantity,
-            price=price,
+            price=mark_price,
             status=OrderStatus.SUBMITTED,
             reason=json.dumps(response, ensure_ascii=False),
         )
@@ -55,19 +57,39 @@ class BithumbLiveExecutor:
 
         # Shadow position tracking for P&L reporting (mirrors paper executor logic)
         if signal.side == SignalSide.BUY:
-            position = Position(
-                symbol=signal.symbol,
-                side=PositionSide.SPOT,
-                quantity=approval.quantity,
-                entry_price=price,
-                mark_price=mark_price,
-                stop_loss=signal.stop_loss,
-                take_profit=signal.take_profit,
-                leverage=1,
+            existing = (
+                session.query(Position)
+                .filter_by(symbol=signal.symbol, status=PositionStatus.OPEN)
+                .order_by(Position.opened_at.asc())
+                .first()
             )
-            session.add(position)
+            if existing is not None:
+                old_q = existing.quantity
+                new_q = approval.quantity
+                total_q = round(old_q + new_q, 6)
+                existing.entry_price = round(
+                    (existing.entry_price * old_q + mark_price * new_q) / total_q,
+                    8,
+                )
+                existing.quantity = total_q
+                existing.mark_price = mark_price
+                existing.stop_loss = signal.stop_loss
+                existing.take_profit = signal.take_profit
+                session.add(existing)
+            else:
+                position = Position(
+                    symbol=signal.symbol,
+                    side=PositionSide.SPOT,
+                    quantity=approval.quantity,
+                    entry_price=mark_price,
+                    mark_price=mark_price,
+                    stop_loss=signal.stop_loss,
+                    take_profit=signal.take_profit,
+                    leverage=1,
+                )
+                session.add(position)
         elif signal.side == SignalSide.SELL:
-            self._close_spot_positions(session, signal.symbol, price)
+            self._close_spot_positions(session, signal.symbol, mark_price)
 
         session.commit()
         session.refresh(order)
@@ -125,6 +147,55 @@ class BithumbLiveExecutor:
             position.unrealized_pnl = 0
             position.status = PositionStatus.CLOSED
             position.closed_at = utc_now()
+
+    def emergency_exit(
+        self,
+        session: Session,
+        position: Position,
+        mark_price: float,
+        reason: str,
+    ) -> PaperOrder:
+        response: dict = {"simulated": True}
+        if self.settings.live_trading_enabled:
+            try:
+                response = self.client.place_market_sell(position.symbol, volume=position.quantity)
+            except Exception as exc:
+                response = {"error": str(exc)}
+        self._close_spot_positions(session, position.symbol, mark_price)
+        order = PaperOrder(
+            symbol=position.symbol,
+            side=OrderSide.SELL,
+            quantity=position.quantity,
+            price=mark_price,
+            status=OrderStatus.FILLED,
+            reason=json.dumps({"exit_reason": reason, "response": response}, ensure_ascii=False),
+        )
+        session.add(order)
+        session.commit()
+        session.refresh(order)
+        return order
+
+    def reconcile_submitted_orders(self, session: Session, symbol: str) -> None:
+        submitted = (
+            session.query(PaperOrder)
+            .filter_by(symbol=symbol, status=OrderStatus.SUBMITTED)
+            .all()
+        )
+        for order in submitted:
+            try:
+                response = json.loads(order.reason or "{}")
+                order_uuid = response.get("uuid")
+                if not order_uuid:
+                    continue
+                status_response = self.client.get_order(order_uuid)
+                bithumb_state = status_response.get("state")
+                if bithumb_state == "done":
+                    order.status = OrderStatus.FILLED
+                elif bithumb_state == "cancel":
+                    order.status = OrderStatus.REJECTED
+            except Exception:
+                pass
+        session.commit()
 
     def _reject(
         self,
