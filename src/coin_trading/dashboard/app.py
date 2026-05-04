@@ -4,7 +4,16 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from coin_trading.config import get_settings
-from coin_trading.db.models import AppState, MarketCandle, PaperOrder, Position, PositionStatus, TradeSignal
+from coin_trading.db.models import (
+    AppState,
+    LLMDecision,
+    MarketCandle,
+    PaperOrder,
+    Position,
+    PositionStatus,
+    RiskEvent,
+    TradeSignal,
+)
 from coin_trading.db.session import SessionLocal, init_db
 from coin_trading.exchange import create_exchange_client
 from coin_trading.market_data import MarketDataCollector
@@ -82,9 +91,7 @@ def main() -> None:
         if "차트" in sections:
             st.subheader(f"{settings.symbol} 가격 차트 ({chart_timeframe}, {chart_days}일)")
             if raw_chart_limit > chart_limit:
-                st.caption(
-                    f"요청 {raw_chart_limit:,}개 캔들 → 최신 {chart_limit:,}개만 표시"
-                )
+                st.caption(f"요청 {raw_chart_limit:,}개 캔들 → 최신 {chart_limit:,}개만 표시")
             if candles:
                 candle_df = pd.DataFrame(
                     [
@@ -140,8 +147,9 @@ def main() -> None:
             else:
                 st.info("차트 캔들 없음. 자동 수집을 켜거나 `refresh-data`를 실행하세요.")
 
-        # ── Tables ────────────────────────────────────────────────────────────
-        available_sections = [s for s in ["보유 포지션", "매매 기록", "신호", "주문"] if s in sections]
+        # ── Tabs ──────────────────────────────────────────────────────────────
+        all_section_keys = ["보유 포지션", "매매 기록", "신호", "주문", "리스크 이벤트", "LLM 결정"]
+        available_sections = [s for s in all_section_keys if s in sections]
         if available_sections:
             tabs = st.tabs(available_sections)
             for tab, section in zip(tabs, available_sections, strict=True):
@@ -154,7 +162,24 @@ def main() -> None:
                             .all()
                         )
                         if open_positions:
-                            st.dataframe(_open_position_rows(open_positions, currency))
+                            st.dataframe(
+                                _open_position_rows(open_positions, currency),
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "종목": st.column_config.TextColumn(width="small"),
+                                    "방향": st.column_config.TextColumn(width="small"),
+                                    "수량": st.column_config.TextColumn(width="small"),
+                                    "평균 매수가": st.column_config.TextColumn(width="medium"),
+                                    "현재가": st.column_config.TextColumn(width="medium"),
+                                    "미실현 손익": st.column_config.TextColumn(width="medium"),
+                                    "수익률": st.column_config.TextColumn(width="small"),
+                                    "투자 금액": st.column_config.TextColumn(width="medium"),
+                                    "손절가": st.column_config.TextColumn(width="medium"),
+                                    "익절가": st.column_config.TextColumn(width="medium"),
+                                    "매수 시각": st.column_config.TextColumn(width="medium"),
+                                },
+                            )
                         else:
                             st.info("현재 보유 포지션 없음")
 
@@ -174,17 +199,77 @@ def main() -> None:
                         signals = (
                             session.query(TradeSignal)
                             .order_by(TradeSignal.created_at.desc())
+                            .limit(200)
                             .all()
                         )
-                        st.dataframe(_rows(signals))
+                        if signals:
+                            st.dataframe(
+                                _signal_rows(signals, currency),
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "시각": st.column_config.TextColumn(width="medium"),
+                                    "방향": st.column_config.TextColumn(width="small"),
+                                    "신뢰도": st.column_config.ProgressColumn(
+                                        min_value=0, max_value=1, format="%.2f", width="small"
+                                    ),
+                                    "진입가": st.column_config.TextColumn(width="medium"),
+                                    "손절": st.column_config.TextColumn(width="medium"),
+                                    "익절": st.column_config.TextColumn(width="medium"),
+                                    "상태": st.column_config.TextColumn(width="small"),
+                                    "근거": st.column_config.TextColumn(width="large"),
+                                },
+                            )
+                        else:
+                            st.info("신호 없음")
 
                     elif section == "주문":
                         all_orders = (
                             session.query(PaperOrder)
                             .order_by(PaperOrder.created_at.desc())
+                            .limit(200)
                             .all()
                         )
-                        st.dataframe(_rows(all_orders))
+                        if all_orders:
+                            st.dataframe(
+                                _order_rows(all_orders, currency),
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "시각": st.column_config.TextColumn(width="medium"),
+                                    "방향": st.column_config.TextColumn(width="small"),
+                                    "수량": st.column_config.TextColumn(width="small"),
+                                    "가격": st.column_config.TextColumn(width="medium"),
+                                    "상태": st.column_config.TextColumn(width="small"),
+                                    "사유": st.column_config.TextColumn(width="large"),
+                                },
+                            )
+                        else:
+                            st.info("주문 없음")
+
+                    elif section == "리스크 이벤트":
+                        risk_events = (
+                            session.query(RiskEvent)
+                            .order_by(RiskEvent.created_at.desc())
+                            .limit(200)
+                            .all()
+                        )
+                        if risk_events:
+                            _render_risk_events(risk_events)
+                        else:
+                            st.info("리스크 이벤트 없음")
+
+                    elif section == "LLM 결정":
+                        decisions = (
+                            session.query(LLMDecision)
+                            .order_by(LLMDecision.created_at.desc())
+                            .limit(100)
+                            .all()
+                        )
+                        if decisions:
+                            _render_llm_decisions(decisions)
+                        else:
+                            st.info("LLM 결정 기록 없음")
     finally:
         session.close()
     _auto_refresh(auto_refresh_seconds)
@@ -215,7 +300,6 @@ def _money(value: float, currency: str) -> str:
 
 
 def _baseline_equity(session, settings, current_equity: float) -> float:
-    """exchange 모드는 DB의 baseline을, paper 모드는 settings.initial_equity를 반환."""
     if settings.portfolio_source == "exchange":
         stored = AppState.get(session, f"baseline_equity:{settings.symbol}")
         return float(stored) if stored else current_equity
@@ -235,11 +319,13 @@ def _sidebar_controls(settings, mode_label: str):
         else timeframe_options.index("10m")
     )
     chart_timeframe = st.sidebar.selectbox("차트 타임프레임", timeframe_options, index=default_index)
-    chart_days = st.sidebar.number_input("차트 기간 (일)", min_value=1, max_value=90, value=settings.dashboard_chart_days, step=1)
+    chart_days = st.sidebar.number_input(
+        "차트 기간 (일)", min_value=1, max_value=90, value=settings.dashboard_chart_days, step=1
+    )
     sections = st.sidebar.multiselect(
         "표시 섹션",
-        ["차트", "보유 포지션", "매매 기록", "신호", "주문"],
-        default=["차트", "보유 포지션", "매매 기록", "신호", "주문"],
+        ["차트", "보유 포지션", "매매 기록", "신호", "주문", "리스크 이벤트", "LLM 결정"],
+        default=["차트", "보유 포지션", "매매 기록", "신호", "주문", "리스크 이벤트", "LLM 결정"],
     )
     auto_refresh_chart = st.sidebar.checkbox("로드 시 차트 캔들 새로고침", value=True)
     auto_refresh_enabled = st.sidebar.checkbox("페이지 자동 새로고침", value=False)
@@ -281,9 +367,96 @@ def _render_trade_history(positions: list[Position], currency: str) -> None:
     total = len(positions)
     s1, s2, s3 = st.columns(3)
     s1.metric("총 실현 손익", _money(total_pnl, currency))
-    s2.metric("승률", f"{wins/total*100:.1f}%" if total > 0 else "—", f"{wins}승 {total-wins}패")
+    s2.metric("승률", f"{wins / total * 100:.1f}%" if total > 0 else "—", f"{wins}승 {total - wins}패")
     s3.metric("총 매매 횟수", total)
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "종목": st.column_config.TextColumn(width="small"),
+            "방향": st.column_config.TextColumn(width="small"),
+            "수량": st.column_config.TextColumn(width="small"),
+            "매수가": st.column_config.TextColumn(width="medium"),
+            "매도가": st.column_config.TextColumn(width="medium"),
+            "실현 손익": st.column_config.TextColumn(width="medium"),
+            "수익률": st.column_config.TextColumn(width="small"),
+            "매수 시각": st.column_config.TextColumn(width="medium"),
+            "매도 시각": st.column_config.TextColumn(width="medium"),
+        },
+    )
+
+
+def _render_risk_events(events: list[RiskEvent]) -> None:
+    type_counts: dict[str, int] = {}
+    for e in events:
+        type_counts[e.event_type.value] = type_counts.get(e.event_type.value, 0) + 1
+
+    cols = st.columns(len(type_counts) or 1)
+    for col, (etype, count) in zip(cols, type_counts.items()):
+        col.metric(etype, count)
+
+    rows = [
+        {
+            "시각": e.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "이벤트": e.event_type.value,
+            "종목": e.symbol,
+            "메시지": e.message,
+        }
+        for e in events
+    ]
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "시각": st.column_config.TextColumn(width="medium"),
+            "이벤트": st.column_config.TextColumn(width="medium"),
+            "종목": st.column_config.TextColumn(width="small"),
+            "메시지": st.column_config.TextColumn(width="large"),
+        },
+    )
+
+
+def _render_llm_decisions(decisions: list[LLMDecision]) -> None:
+    total_input = sum((d.token_usage or {}).get("input_tokens", 0) for d in decisions)
+    total_output = sum((d.token_usage or {}).get("output_tokens", 0) for d in decisions)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("총 결정 수", len(decisions))
+    m2.metric("총 입력 토큰", f"{total_input:,}")
+    m3.metric("총 출력 토큰", f"{total_output:,}")
+
+    rows = []
+    for d in decisions:
+        usage = d.token_usage or {}
+        signal_side = ""
+        if isinstance(d.response, dict):
+            signal_side = d.response.get("side", d.response.get("action", ""))
+        rows.append({
+            "시각": d.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "공급자": d.provider,
+            "모델": d.model,
+            "신호": signal_side if signal_side else "—",
+            "입력 토큰": usage.get("input_tokens", "—"),
+            "출력 토큰": usage.get("output_tokens", "—"),
+            "프롬프트 요약": d.prompt_summary,
+        })
+
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "시각": st.column_config.TextColumn(width="medium"),
+            "공급자": st.column_config.TextColumn(width="small"),
+            "모델": st.column_config.TextColumn(width="medium"),
+            "신호": st.column_config.TextColumn(width="small"),
+            "입력 토큰": st.column_config.NumberColumn(width="small"),
+            "출력 토큰": st.column_config.NumberColumn(width="small"),
+            "프롬프트 요약": st.column_config.TextColumn(width="large"),
+        },
+    )
 
 
 def _open_position_rows(positions: list[Position], currency: str) -> pd.DataFrame:
@@ -307,6 +480,36 @@ def _open_position_rows(positions: list[Position], currency: str) -> pd.DataFram
             "손절가": _money(pos.stop_loss, currency) if pos.stop_loss else "—",
             "익절가": _money(pos.take_profit, currency) if pos.take_profit else "—",
             "매수 시각": pos.opened_at.strftime("%Y-%m-%d %H:%M") if pos.opened_at else "",
+        })
+    return pd.DataFrame(rows)
+
+
+def _signal_rows(signals: list[TradeSignal], currency: str) -> pd.DataFrame:
+    rows = []
+    for s in signals:
+        rows.append({
+            "시각": s.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "방향": s.side.value,
+            "신뢰도": s.confidence,
+            "진입가": _money(s.entry_price, currency) if s.entry_price else "—",
+            "손절": _money(s.stop_loss, currency) if s.stop_loss else "—",
+            "익절": _money(s.take_profit, currency) if s.take_profit else "—",
+            "상태": s.status,
+            "근거": s.rationale,
+        })
+    return pd.DataFrame(rows)
+
+
+def _order_rows(orders: list[PaperOrder], currency: str) -> pd.DataFrame:
+    rows = []
+    for o in orders:
+        rows.append({
+            "시각": o.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "방향": o.side.value,
+            "수량": f"{o.quantity:.6g}",
+            "가격": _money(o.price, currency),
+            "상태": o.status.value,
+            "사유": o.reason or "—",
         })
     return pd.DataFrame(rows)
 
@@ -362,14 +565,6 @@ def _auto_refresh(seconds: int) -> None:
         </script>""",
         height=0,
     )
-
-
-def _rows(models: list[object]) -> pd.DataFrame:
-    rows = [
-        {col.name: getattr(model, col.name) for col in model.__table__.columns}  # type: ignore[attr-defined]
-        for model in models
-    ]
-    return pd.DataFrame(rows)
 
 
 if __name__ == "__main__":

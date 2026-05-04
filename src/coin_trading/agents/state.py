@@ -9,4 +9,6 @@ class AgentState(TypedDict):
     bull_argument: str
     bear_argument: str
     final_result: LLMResult | None
-    llm: TradingLLM
+    llm: TradingLLM           # fund manager
+    analyst_llm: TradingLLM   # technical + sentiment analyst
+    researcher_llm: TradingLLM  # bull + bear researcher

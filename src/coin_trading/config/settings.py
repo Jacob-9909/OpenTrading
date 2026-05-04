@@ -23,24 +23,26 @@ class Settings(BaseSettings):
     live_max_order_krw: float = Field(default=100_000, gt=0)
     exchange: Literal["bithumb_spot", "binance_futures", "yfinance"] = "bithumb_spot"
     symbol: str = "KRW-BTC"
-    timeframe: str = "1h"
-    lookback_limit: int = Field(default=200, ge=50, le=1500)
-    analysis_timeframes: list[str] = Field(default_factory=lambda: ["1h", "4h", "1d"])
+    timeframe: str = "10m"
+    lookback_limit: int = Field(default=500, ge=50, le=1500)
+    analysis_timeframes: list[str] = Field(default_factory=lambda: ["10m", "30m", "1h", "4h", "1d"])
     recent_candle_limit: int = Field(default=60, ge=30, le=120)
     dashboard_chart_timeframe: str = "10m"
     dashboard_chart_days: int = Field(default=10, ge=1, le=90)
 
     initial_equity: float | None = Field(default=None, gt=0)
     risk_per_trade: float = Field(default=0.01, gt=0, le=0.10)
-    daily_max_loss: float = Field(default=0.03, gt=0, le=0.50)
     max_leverage: int = Field(default=3, ge=1, le=125)
-    max_open_positions: int = Field(default=1, ge=1, le=20)
     max_position_allocation_pct: float = Field(default=30.0, gt=0, le=100)
     liquidation_buffer: float = Field(default=0.08, gt=0, le=0.50)
     kill_switch_drawdown: float = Field(default=0.10, gt=0, le=0.90)
 
     llm_provider: Literal["mock", "openai", "gemini", "openrouter", "nvidia"] = "mock"
     llm_model: str = "gpt-4o-mini"
+    analyst_llm_provider: str | None = None   # falls back to llm_provider if unset
+    analyst_llm_model: str | None = None      # falls back to llm_model if unset
+    researcher_llm_provider: str | None = None
+    researcher_llm_model: str | None = None
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None

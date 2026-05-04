@@ -7,9 +7,9 @@ from coin_trading.agents.prompts.analyst_prompts import (
 
 def technical_analyst_node(state: AgentState) -> dict:
     print("   -> [Node] Technical Analyst is analyzing charts...")
-    llm = state["llm"]
+    llm = state["analyst_llm"]
     context = state["context"]
-    
+
     tech_context = {
         "symbol": context.get("symbol"),
         "timeframe": context.get("timeframe"),
@@ -18,7 +18,7 @@ def technical_analyst_node(state: AgentState) -> dict:
         "multi_timeframe": context.get("multi_timeframe"),
         "recent_candles": context.get("recent_candles", [])[:10],
     }
-    
+
     report = llm.chat(TECHNICAL_ANALYST_SYSTEM_PROMPT, json.dumps(tech_context, ensure_ascii=False))
     print("\n" + "="*50)
     print("📈 [TECHNICAL REPORT]")
@@ -30,14 +30,14 @@ def technical_analyst_node(state: AgentState) -> dict:
 
 def sentiment_analyst_node(state: AgentState) -> dict:
     print("   -> [Node] Sentiment Analyst is reading news...")
-    llm = state["llm"]
+    llm = state["analyst_llm"]
     context = state["context"]
-    
+
     news_context = {
         "symbol": context.get("symbol"),
         "news": context.get("news", [])
     }
-    
+
     report = llm.chat(SENTIMENT_ANALYST_SYSTEM_PROMPT, json.dumps(news_context, ensure_ascii=False))
     print("\n" + "="*50)
     print("📰 [SENTIMENT REPORT]")

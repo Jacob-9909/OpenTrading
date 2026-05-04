@@ -406,6 +406,7 @@ dependencies = [
     { name = "streamlit" },
     { name = "tenacity" },
     { name = "typer" },
+    { name = "websockets" },
     { name = "yfinance" },
 ]
 
@@ -445,6 +446,7 @@ requires-dist = [
     { name = "streamlit" },
     { name = "tenacity" },
     { name = "typer" },
+    { name = "websockets" },
     { name = "yfinance" },
 ]
 provides-extras = ["dev"]

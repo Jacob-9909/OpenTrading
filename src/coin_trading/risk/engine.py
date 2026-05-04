@@ -141,26 +141,10 @@ class RiskEngine:
     ) -> str | None:
         if signal.leverage > self.settings.max_leverage:
             return f"Leverage {signal.leverage} exceeds max {self.settings.max_leverage}."
-        open_positions = (
-            session.query(Position)
-            .filter_by(symbol=signal.symbol, status=PositionStatus.OPEN)
-            .count()
-        )
         if self.settings.exchange == "bithumb_spot" and signal.side == SignalSide.SELL:
             if self._spot_sell_quantity(session, signal.symbol, mark_price) <= 0:
                 return "No open spot position to sell."
             return None
-        if open_positions >= self.settings.max_open_positions:
-            # One symbol = one spot balance; additional BUYs merge into the existing OPEN row
-            # (see PaperExecutor / BithumbLiveExecutor). Do not block pyramiding on row count.
-            if not (
-                self.settings.exchange == "bithumb_spot" and signal.side == SignalSide.BUY
-            ):
-                return "Maximum open positions reached."
-        daily_loss = self._daily_realized_loss(session, signal.symbol)
-        current_equity = self._current_equity(session, signal.symbol, mark_price)
-        if current_equity > 0 and daily_loss <= -(current_equity * self.settings.daily_max_loss):
-            return "Daily max loss limit reached."
         if signal.side == SignalSide.BUY and self._kill_switch_active(session, signal.symbol, mark_price):
             return f"Kill switch: portfolio drawdown exceeds {self.settings.kill_switch_drawdown:.0%}."
         if self._reentry_cooldown_active(session, signal):
@@ -219,15 +203,6 @@ class RiskEngine:
             available_quantity = snapshot.base_asset_quantity - snapshot.base_locked
             return round(max(available_quantity, 0), 6)
         return self._open_spot_quantity(session, symbol)
-
-    def _daily_realized_loss(self, session: Session, symbol: str) -> float:
-        start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        positions = (
-            session.query(Position)
-            .filter(Position.symbol == symbol, Position.closed_at >= start)
-            .all()
-        )
-        return sum(position.realized_pnl for position in positions if position.realized_pnl < 0)
 
     def _record_rejection(
         self,

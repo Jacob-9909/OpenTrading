@@ -77,5 +77,17 @@ def serve_run_once() -> None:
     TradingPipeline(get_settings()).serve_run_once()
 
 
+@cli.command("position-monitor")
+def position_monitor() -> None:
+    init_db()
+    TradingPipeline(get_settings()).serve_position_monitor()
+
+
+@cli.command("serve-all")
+def serve_all() -> None:
+    init_db()
+    TradingPipeline(get_settings()).serve_all()
+
+
 def main() -> None:
     cli()

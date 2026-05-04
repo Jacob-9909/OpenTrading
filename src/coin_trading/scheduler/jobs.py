@@ -1,3 +1,5 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -7,12 +9,13 @@ from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
 from coin_trading.db.models import MarketCandle, Position, PositionStatus, RiskEventType, TradeSignal
+from coin_trading.exchange.bithumb_ws import BithumbCandleStreamer, BithumbTickerMonitor
 from coin_trading.execution.live_bithumb import BithumbLiveExecutor
 from coin_trading.db.session import SessionLocal
 from coin_trading.exchange import create_exchange_client
 from coin_trading.execution import create_executor
 from coin_trading.indicators import IndicatorCalculator
-from coin_trading.llm import create_llm
+from coin_trading.llm import create_agent_llm, create_llm
 from coin_trading.market_data import MarketDataCollector
 from coin_trading.news import NewsCollector
 from coin_trading.risk import RiskEngine
@@ -38,6 +41,7 @@ class DataRefreshResult:
 class TradingPipeline:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._deciding = threading.Event()
         client = create_exchange_client(settings)
         self.account_client = client
         self.market_data = MarketDataCollector(client)
@@ -46,32 +50,46 @@ class TradingPipeline:
         self.risk = RiskEngine(settings, account_client=self.account_client)
         self.executor = create_executor(settings, client)
         self.strategy = StrategyService(
-            create_llm(settings),
-            LLMContextBuilder(
+            llm=create_llm(settings),
+            context_builder=LLMContextBuilder(
                 settings=settings,
                 account_client=self.account_client,
                 analysis_timeframes=settings.analysis_timeframes,
                 recent_candle_limit=settings.recent_candle_limit,
             ),
+            analyst_llm=create_agent_llm(
+                settings, settings.analyst_llm_provider, settings.analyst_llm_model
+            ),
+            researcher_llm=create_agent_llm(
+                settings, settings.researcher_llm_provider, settings.researcher_llm_model
+            ),
         )
 
     def refresh_data_once(self, session: Session | None = None) -> DataRefreshResult:
+        collection_requests = self._collection_requests()
+        candles_by_tf: dict[str, list] = {}
+
+        futures: dict = {}
+        with ThreadPoolExecutor() as pool:
+            futures["news"] = pool.submit(self._fetch_news_parallel)
+            for timeframe, limit in collection_requests.items():
+                futures[timeframe] = pool.submit(
+                    self._fetch_candles_parallel, timeframe, limit
+                )
+            for key, future in futures.items():
+                if key == "news":
+                    future.result()
+                else:
+                    candles_by_tf[key] = future.result()
+
+        candles = candles_by_tf.get(self.settings.timeframe, [])
+        latest_price = (
+            candles[-1].close if candles else self.market_data.get_mark_price(self.settings.symbol)
+        )
+
         owns_session = session is None
         session = session or SessionLocal()
         try:
-            candles = []
-            collection_requests = self._collection_requests()
-            for timeframe, limit in collection_requests.items():
-                collected = self.market_data.collect_candles(
-                    session,
-                    symbol=self.settings.symbol,
-                    timeframe=timeframe,
-                    limit=limit,
-                )
-                if timeframe == self.settings.timeframe:
-                    candles = collected
-            latest_price = candles[-1].close if candles else self.market_data.get_mark_price(self.settings.symbol)
-            self.news.collect(session)
             for timeframe in self._collection_timeframes():
                 self.indicators.calculate_latest(
                     session,
@@ -86,6 +104,16 @@ class TradingPipeline:
         finally:
             if owns_session:
                 session.close()
+
+    def _fetch_candles_parallel(self, timeframe: str, limit: int) -> list:
+        with SessionLocal() as s:
+            return self.market_data.collect_candles(
+                s, symbol=self.settings.symbol, timeframe=timeframe, limit=limit
+            )
+
+    def _fetch_news_parallel(self) -> None:
+        with SessionLocal() as s:
+            self.news.collect(s)
 
     def decide_once(self, session: Session | None = None) -> PipelineResult:
         owns_session = session is None
@@ -181,6 +209,68 @@ class TradingPipeline:
             next_run_time=datetime.now(ZoneInfo(self.settings.scheduler_timezone)),
         )
         scheduler.start()
+
+    def serve_all(self) -> None:
+        """Decision scheduler + WebSocket SL/TP monitor + candle streamer in one process."""
+        monitor = BithumbTickerMonitor(
+            symbol=self.settings.symbol,
+            on_price=self._on_monitor_price,
+        )
+        monitor.start()
+
+        streamer_timeframes = [tf for tf in self._collection_timeframes() if tf != "1d"]
+        streamer = BithumbCandleStreamer(
+            symbol=self.settings.symbol,
+            timeframes=streamer_timeframes,
+            indicators=self.indicators,
+            lookback_limit=self.settings.lookback_limit,
+        )
+        streamer.start()
+
+        print(
+            f"[serve-all] started "
+            f"(interval={self.settings.run_once_interval_minutes}m, "
+            f"ws-monitor=active, ws-streamer={streamer_timeframes}, "
+            f"timezone={self.settings.scheduler_timezone})"
+        )
+        scheduler = BlockingScheduler(timezone=self.settings.scheduler_timezone)
+        scheduler.add_job(
+            self._run_once_with_log,
+            "interval",
+            minutes=self.settings.run_once_interval_minutes,
+            next_run_time=datetime.now(ZoneInfo(self.settings.scheduler_timezone)),
+        )
+        try:
+            scheduler.start()
+        except KeyboardInterrupt:
+            print("[serve-all] Stopping...")
+            monitor.stop()
+            streamer.stop()
+
+    def serve_position_monitor(self) -> None:
+        """WebSocket real-time SL/TP monitor. Blocks until interrupted."""
+        print(f"[position-monitor] Starting WebSocket monitor for {self.settings.symbol} ...")
+        monitor = BithumbTickerMonitor(
+            symbol=self.settings.symbol,
+            on_price=self._on_monitor_price,
+        )
+        monitor.start()
+        try:
+            monitor.join()
+        except KeyboardInterrupt:
+            print("[position-monitor] Stopping...")
+            monitor.stop()
+
+    def _on_monitor_price(self, price: float) -> None:
+        if self._deciding.is_set():
+            return
+        try:
+            with SessionLocal() as session:
+                events = self.risk.monitor_open_positions(session, price, self.settings.symbol)
+                if events and self.settings.trading_mode != "signal_only":
+                    self._execute_risk_exits(session, events, price)
+        except Exception as exc:
+            print(f"[position-monitor] ERROR: {exc.__class__.__name__}: {exc}")
 
     def serve_run_once(self) -> None:
         scheduler = BlockingScheduler(timezone=self.settings.scheduler_timezone)
@@ -324,6 +414,7 @@ class TradingPipeline:
     def _run_once_with_log(self) -> None:
         started_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
         print(f"[serve-run-once] cycle start: {started_at}")
+        self._deciding.set()
         try:
             result = self.run_once()
             ended_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
@@ -335,3 +426,5 @@ class TradingPipeline:
         except Exception as exc:
             ended_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
             print(f"[serve-run-once] cycle ERROR at {ended_at}: {exc.__class__.__name__}: {exc}")
+        finally:
+            self._deciding.clear()

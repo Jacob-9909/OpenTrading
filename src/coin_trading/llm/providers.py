@@ -506,6 +506,21 @@ class NvidiaTradingLLM(TradingLLM):
         return response.choices[0].message.content or ""
 
 
+def create_agent_llm(
+    settings: Settings,
+    provider_override: str | None,
+    model_override: str | None,
+) -> TradingLLM:
+    """Create LLM with optional provider/model override; falls back to settings defaults."""
+    if not provider_override and not model_override:
+        return create_llm(settings)
+    patched = settings.model_copy(update={
+        "llm_provider": provider_override or settings.llm_provider,
+        "llm_model": model_override or settings.llm_model,
+    })
+    return create_llm(patched)
+
+
 def create_llm(settings: Settings) -> TradingLLM:
     if settings.llm_provider == "openai":
         if not settings.openai_api_key:

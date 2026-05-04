@@ -24,6 +24,7 @@ dependencies = [
     "streamlit",
     "tenacity",
     "typer",
+    "websockets",
     "langgraph>=1.1.10",
     "yfinance",
 ]

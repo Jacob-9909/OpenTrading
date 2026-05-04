@@ -141,8 +141,8 @@ def test_risk_engine_uses_exchange_available_balance_for_spot_sell() -> None:
     assert approval.quantity == 0.01
 
 
-def test_risk_engine_allows_second_bithumb_spot_buy_when_max_open_is_one() -> None:
-    """Spot adds merge into one OPEN row; risk must not reject BUY for row-count alone."""
+def test_risk_engine_allows_second_bithumb_spot_buy_when_position_exists() -> None:
+    """BUY approved even when an open position already exists (no position-count limit)."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
@@ -162,7 +162,6 @@ def test_risk_engine_allows_second_bithumb_spot_buy_when_max_open_is_one() -> No
         portfolio_source="paper",
         exchange="bithumb_spot",
         symbol="KRW-BTC",
-        max_open_positions=1,
         initial_equity=200_000_000.0,
     )
     signal = TradeSignal(

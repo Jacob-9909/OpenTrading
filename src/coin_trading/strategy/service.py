@@ -7,8 +7,16 @@ from coin_trading.strategy.context import LLMContextBuilder
 
 
 class StrategyService:
-    def __init__(self, llm: TradingLLM, context_builder: LLMContextBuilder) -> None:
+    def __init__(
+        self,
+        llm: TradingLLM,
+        context_builder: LLMContextBuilder,
+        analyst_llm: TradingLLM | None = None,
+        researcher_llm: TradingLLM | None = None,
+    ) -> None:
         self.llm = llm
+        self.analyst_llm = analyst_llm or llm
+        self.researcher_llm = researcher_llm or llm
         self.context_builder = context_builder
 
     def create_signal(
@@ -19,25 +27,24 @@ class StrategyService:
         latest_price: float,
     ) -> TradeSignal:
         context = self.context_builder.build(session, symbol, timeframe, latest_price)
-        
-        # Multi-Agent Workflow
+
         print(f"\n🤖 [Multi-Agent] Starting AI debate for {symbol}...")
         agent_graph = create_trading_agent_graph()
         initial_state = {
             "context": context,
             "llm": self.llm,
+            "analyst_llm": self.analyst_llm,
+            "researcher_llm": self.researcher_llm,
         }
         final_state = agent_graph.invoke(initial_state)
         llm_result = final_state["final_result"]
         print("✅ [Multi-Agent] Debate concluded and Fund Manager made a decision.\n")
-        
-        # We append the multi-agent debate and reports to the context summary
-        prompt_summary = self.context_builder.summarize(context)
-        prompt_summary += "\n[Multi-Agent] Used Technical, Sentiment, and Researcher nodes."
+
         llm_decision = LLMDecision(
             provider=llm_result.provider,
             model=llm_result.model,
-            prompt_summary=self.context_builder.summarize(context),
+            prompt_summary=self.context_builder.summarize(context)
+                + "\n[Multi-Agent] Used Technical, Sentiment, and Researcher nodes.",
             response=llm_result.raw_response,
             token_usage=llm_result.token_usage,
         )
