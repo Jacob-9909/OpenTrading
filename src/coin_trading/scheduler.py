@@ -219,6 +219,7 @@ class TradingPipeline:
         streamer = BithumbCandleStreamer(
             symbol=self.settings.symbol,
             timeframes=streamer_timeframes,
+            session_factory=SessionLocal,
             indicators=self.indicators,
             lookback_limit=self.settings.lookback_limit,
         )

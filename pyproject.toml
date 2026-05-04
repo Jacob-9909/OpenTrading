@@ -26,6 +26,7 @@ dependencies = [
     "websockets",
     "langgraph>=1.1.10",
     "yfinance",
+    "streamlit-autorefresh>=1.0.1",
 ]
 
 [project.optional-dependencies]

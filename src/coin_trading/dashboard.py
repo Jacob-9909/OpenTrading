@@ -2,6 +2,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 
 from coin_trading.config import get_settings
 from coin_trading.db.models import (
@@ -126,7 +127,7 @@ def main() -> None:
                         )
                     ]
                 )
-                candle_duration = pd.Timedelta(minutes=_timeframe_minutes(chart_timeframe))
+                candle_duration = pd.Timedelta(minutes=timeframe_minutes(chart_timeframe))
                 order_df = _orders_in_range(orders, candle_df["time"].min(), candle_df["time"].max() + candle_duration)
                 if not order_df.empty:
                     buy_df = order_df[order_df["side"] == "BUY"]
@@ -336,15 +337,25 @@ def _sidebar_controls(settings, mode_label: str):
         ["차트", "보유 포지션", "매매 기록", "신호", "주문", "리스크 이벤트", "LLM 결정"],
         default=["차트", "보유 포지션", "매매 기록", "신호", "주문", "리스크 이벤트", "LLM 결정"],
     )
+    if "auto_refresh_enabled" not in st.session_state:
+        st.session_state.auto_refresh_enabled = False
+    if "auto_refresh_seconds" not in st.session_state:
+        st.session_state.auto_refresh_seconds = 60
+
     auto_refresh_chart = st.sidebar.checkbox("로드 시 차트 캔들 새로고침", value=True)
-    auto_refresh_enabled = st.sidebar.checkbox("페이지 자동 새로고침", value=False)
+    auto_refresh_enabled = st.sidebar.checkbox(
+        "페이지 자동 새로고침",
+        value=st.session_state.auto_refresh_enabled,
+        key="auto_refresh_enabled",
+    )
     auto_refresh_seconds = st.sidebar.number_input(
         "자동 새로고침 간격 (초)",
         min_value=10,
         max_value=3600,
-        value=60,
+        value=st.session_state.auto_refresh_seconds,
         step=10,
         disabled=not auto_refresh_enabled,
+        key="auto_refresh_seconds",
     )
     return chart_timeframe, int(chart_days), sections, auto_refresh_chart, int(
         auto_refresh_seconds if auto_refresh_enabled else 0
@@ -563,12 +574,7 @@ def _as_utc_timestamp(value) -> pd.Timestamp:
 def _auto_refresh(seconds: int) -> None:
     if seconds <= 0:
         return
-    components.html(
-        f"""<script>
-            setTimeout(function() {{ window.parent.location.reload(); }}, {seconds * 1000});
-        </script>""",
-        height=0,
-    )
+    st_autorefresh(interval=seconds * 1000, key="dashboard_autorefresh")
 
 
 if __name__ == "__main__":
