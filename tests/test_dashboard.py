@@ -1,6 +1,10 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-from coin_trading.dashboard import _chart_candle_limit, _orders_in_range
+import pandas as pd
+
+from coin_trading.dashboard import _chart_candle_limit, _hold_signals_in_range, _orders_in_range
 from coin_trading.market.indicators import timeframe_minutes as _timeframe_minutes
 
 
@@ -40,3 +44,48 @@ def test_orders_in_range_filters_markers_to_chart_window() -> None:
 
     assert len(df) == 1
     assert df.iloc[0]["price"] == 100
+
+
+def test_hold_signals_in_range_maps_price_to_last_close_before_signal() -> None:
+    now = datetime.now(timezone.utc)
+    t0 = now - timedelta(minutes=30)
+    t1 = now - timedelta(minutes=10)
+    candle_df = pd.DataFrame({"time": [t0, t1], "open": [0, 0], "high": [0, 0], "low": [0, 0], "close": [100.0, 110.0]})
+    sig = SimpleNamespace(created_at=now, entry_price=None)
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
+
+    df = _hold_signals_in_range(session, "BTC-KRW", candle_df, t0, now + timedelta(minutes=1))
+
+    assert len(df) == 1
+    assert df.iloc[0]["price"] == 110.0
+
+
+def test_hold_signals_in_range_uses_entry_price_when_set() -> None:
+    now = datetime.now(timezone.utc)
+    t0 = now - timedelta(minutes=30)
+    candle_df = pd.DataFrame({"time": [t0], "open": [0], "high": [0], "low": [0], "close": [100.0]})
+    sig = SimpleNamespace(created_at=now, entry_price=99.5)
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
+
+    df = _hold_signals_in_range(session, "BTC-KRW", candle_df, t0, now + timedelta(minutes=1))
+
+    assert len(df) == 1
+    assert df.iloc[0]["price"] == 99.5
+
+
+def test_hold_signals_in_range_skips_signals_before_first_candle() -> None:
+    now = datetime.now(timezone.utc)
+    t0 = now - timedelta(minutes=10)
+    candle_df = pd.DataFrame({"time": [t0], "open": [0], "high": [0], "low": [0], "close": [100.0]})
+    sig = SimpleNamespace(created_at=now - timedelta(hours=1), entry_price=None)
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [sig]
+
+    df = _hold_signals_in_range(session, "BTC-KRW", candle_df, now - timedelta(hours=2), now)
+
+    assert df.empty

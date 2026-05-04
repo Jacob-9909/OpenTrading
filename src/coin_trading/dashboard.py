@@ -14,6 +14,7 @@ from coin_trading.db.models import (
     PositionSide,
     PositionStatus,
     RiskEvent,
+    SignalSide,
     TradeSignal,
 )
 from coin_trading.db.session import SessionLocal, init_db
@@ -152,6 +153,23 @@ def main() -> None:
                                 name="매도",
                             )
                         )
+                hold_df = _hold_signals_in_range(
+                    session,
+                    settings.symbol,
+                    candle_df,
+                    candle_df["time"].min(),
+                    candle_df["time"].max() + candle_duration,
+                )
+                if not hold_df.empty:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=hold_df["time"],
+                            y=hold_df["price"],
+                            mode="markers",
+                            marker={"size": 10, "color": "#78909c", "symbol": "circle", "line": {"width": 1, "color": "#455a64"}},
+                            name="관망 (HOLD)",
+                        )
+                    )
                 fig.update_layout(height=620, xaxis_rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=True)
             else:
@@ -563,6 +581,42 @@ def _orders_in_range(orders: list[PaperOrder], start, end) -> pd.DataFrame:
         for order in orders
         if order.price and start_ts <= _as_utc_timestamp(order.created_at) <= end_ts
     ]
+    return pd.DataFrame(rows)
+
+
+def _hold_signals_in_range(
+    session,
+    symbol: str,
+    candle_df: pd.DataFrame,
+    start,
+    end,
+) -> pd.DataFrame:
+    """HOLD 신호는 주문이 없어 차트에 안 나오므로, 캔들 구간 안의 HOLD를 마커로 표시."""
+    if candle_df.empty:
+        return pd.DataFrame(columns=["time", "price"])
+    start_ts = _as_utc_timestamp(start)
+    end_ts = _as_utc_timestamp(end)
+    candle_times = candle_df["time"].map(_as_utc_timestamp)
+
+    signals = (
+        session.query(TradeSignal)
+        .filter(TradeSignal.symbol == symbol, TradeSignal.side == SignalSide.HOLD)
+        .order_by(TradeSignal.created_at.asc())
+        .all()
+    )
+    rows: list[dict] = []
+    for sig in signals:
+        ts = _as_utc_timestamp(sig.created_at)
+        if not (start_ts <= ts <= end_ts):
+            continue
+        if sig.entry_price is not None:
+            price = float(sig.entry_price)
+        else:
+            mask = candle_times <= ts
+            if not mask.any():
+                continue
+            price = float(candle_df.loc[mask, "close"].iloc[-1])
+        rows.append({"time": sig.created_at, "price": price})
     return pd.DataFrame(rows)
 
 

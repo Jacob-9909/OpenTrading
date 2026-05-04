@@ -1,0 +1,9 @@
+# 로컬(`uv run streamlit run ...`)·볼륨 마운트 환경에서 소스 저장 시 앱이 다시 실행되도록 합니다.
+# 기본값은 server.runOnSave=false 라서, 수정 후 브라우저에서 수동으로 Rerun 해야 했습니다.
+
+[server]
+runOnSave = true
+fileWatcherType = "auto"
+
+[runner]
+fastReruns = true

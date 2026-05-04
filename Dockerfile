@@ -12,6 +12,7 @@ RUN apt-get update \
     && pip install --no-cache-dir uv
 
 COPY pyproject.toml README.md ./
+COPY .streamlit/config.toml ./.streamlit/config.toml
 COPY src ./src
 
 RUN uv pip install --system -e ".[dev]"
