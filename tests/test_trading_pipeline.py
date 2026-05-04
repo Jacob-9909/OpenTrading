@@ -12,8 +12,8 @@ from coin_trading.db.models import (
     TradeSignal,
 )
 from coin_trading.db.session import Base
-from coin_trading.risk import RiskApproval
-from coin_trading.scheduler.jobs import TradingPipeline
+from coin_trading.trade import RiskApproval
+from coin_trading.scheduler import TradingPipeline
 
 
 class FakeMarketData:

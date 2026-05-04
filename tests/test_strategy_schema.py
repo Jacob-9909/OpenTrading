@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from coin_trading.strategy.schemas import TradingDecision
+from coin_trading.agent.schemas import TradingDecision
 
 
 def test_buy_decision_requires_stop_below_entry_and_target_above() -> None:

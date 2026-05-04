@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from coin_trading.config import Settings
 from coin_trading.db.models import IndicatorSnapshot, MarketCandle
 from coin_trading.db.session import Base
-from coin_trading.strategy.context import LLMContextBuilder
+from coin_trading.agent.context import LLMContextBuilder
 
 
 class FakeAccountClient:

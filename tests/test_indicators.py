@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from coin_trading.indicators import IndicatorCalculator
+from coin_trading.market import IndicatorCalculator
 
 
 def test_indicator_calculator_adds_core_columns() -> None:

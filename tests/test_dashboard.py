@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from coin_trading.dashboard.app import _chart_candle_limit, _orders_in_range, _timeframe_minutes
+from coin_trading.dashboard import _chart_candle_limit, _orders_in_range, _timeframe_minutes
 
 
 class FakeSide:

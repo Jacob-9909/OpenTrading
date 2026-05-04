@@ -1,7 +1,7 @@
 import jwt
 from datetime import datetime, timezone
 
-from coin_trading.exchange.bithumb import BithumbSpotClient
+from coin_trading.market.exchange.bithumb import BithumbSpotClient
 
 
 def test_bithumb_query_string_expands_arrays() -> None:

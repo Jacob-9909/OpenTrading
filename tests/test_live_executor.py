@@ -4,8 +4,8 @@ from sqlalchemy.orm import sessionmaker
 from coin_trading.config import Settings
 from coin_trading.db.models import OrderStatus, SignalSide, TradeSignal
 from coin_trading.db.session import Base
-from coin_trading.execution.live_bithumb import BithumbLiveExecutor
-from coin_trading.risk import RiskApproval
+from coin_trading.trade.execution.live_bithumb import BithumbLiveExecutor
+from coin_trading.trade import RiskApproval
 
 
 class FakeBithumbClient:

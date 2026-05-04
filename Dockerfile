@@ -16,4 +16,4 @@ COPY src ./src
 
 RUN uv pip install --system -e ".[dev]"
 
-CMD ["coin-trading", "run-once"]
+CMD ["coin-trading", "serve-all"]

@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from coin_trading.config import Settings
 from coin_trading.db.models import Position, PositionSide, PositionStatus, SignalSide, TradeSignal
 from coin_trading.db.session import Base
-from coin_trading.risk import RiskEngine
+from coin_trading.trade import RiskEngine
 
 
 class FakeSession:

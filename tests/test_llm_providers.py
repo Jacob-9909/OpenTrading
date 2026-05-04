@@ -1,7 +1,7 @@
 import pytest
 
 from coin_trading.config import Settings
-from coin_trading.llm.providers import OpenRouterTradingLLM, SYSTEM_PROMPT, create_llm
+from coin_trading.agent.llm import OpenRouterTradingLLM, SYSTEM_PROMPT, create_llm
 
 
 def test_openrouter_provider_requires_api_key() -> None:

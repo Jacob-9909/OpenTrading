@@ -5,8 +5,8 @@ from sqlalchemy.orm import sessionmaker
 
 from coin_trading.db.models import MarketCandle
 from coin_trading.db.session import Base
-from coin_trading.exchange import Candle
-from coin_trading.market_data import MarketDataCollector
+from coin_trading.market.exchange import Candle
+from coin_trading.market import MarketDataCollector
 
 
 class FakeMarketDataClient:

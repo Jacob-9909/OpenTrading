@@ -5,7 +5,6 @@ description = "Batch-oriented Bithumb spot LLM trading system with paper trading
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "alembic",
     "apscheduler",
     "feedparser",
     "google-genai",

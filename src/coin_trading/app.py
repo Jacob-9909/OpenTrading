@@ -59,30 +59,6 @@ def decide_once() -> None:
     )
 
 
-@cli.command("serve")
-def serve() -> None:
-    init_db()
-    TradingPipeline(get_settings()).serve()
-
-
-@cli.command("serve-decisions")
-def serve_decisions() -> None:
-    init_db()
-    TradingPipeline(get_settings()).serve_decisions()
-
-
-@cli.command("serve-run-once")
-def serve_run_once() -> None:
-    init_db()
-    TradingPipeline(get_settings()).serve_run_once()
-
-
-@cli.command("position-monitor")
-def position_monitor() -> None:
-    init_db()
-    TradingPipeline(get_settings()).serve_position_monitor()
-
-
 @cli.command("serve-all")
 def serve_all() -> None:
     init_db()
