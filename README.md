@@ -17,7 +17,7 @@ LLM이 시장 데이터·기술 지표·뉴스를 종합해 BUY / SELL / HOLD를
 ```mermaid
 graph TD
     subgraph Data Layer
-        DB[(SQLite/PostgreSQL)] --> Context[Context Builder]
+        DB[(SQLite)] --> Context[Context Builder]
     end
 
     subgraph LangGraph Multi-Agent Workflow
@@ -30,7 +30,7 @@ graph TD
     end
 
     subgraph Execution Layer
-        Fund -- BUY / SELL / HOLD --> Risk[Risk Engine]
+        Fund -- LONG / SHORT / HOLD --> Risk[Risk Engine]
         Risk --> Exec[Execution Engine]
         Exec --> Exchange((Bithumb / Paper))
     end
@@ -44,11 +44,11 @@ graph TD
 ┌─────────────────────────────────────────────────────────┐
 │                       serve-all                         │
 │                                                         │
-│  WebSocket TickerMonitor  ──→  실시간 SL/TP 자동 청산    │
-│  WebSocket CandleStreamer ──→  실시간 캔들·지표 갱신      │
-│  Scheduler (15분 interval) ─→  데이터 수집 + LLM 결정    │
+│  WebSocket TickerMonitor  ──→  실시간 SL/TP 자동 청산       │
+│  WebSocket CandleStreamer ──→  실시간 캔들·지표 갱신         │
+│  Scheduler (15분 interval) ─→  데이터 수집 + LLM 결정       │
 │                                                         │
-│  * LLM 결정 중 가격이 0.5% 이상 움직이면 주문 취소        │
+│  * LLM 결정 중 가격이 0.5% 이상 움직이면 주문 취소               │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -100,22 +100,6 @@ BITHUMB_ACCESS_KEY=<발급받은 키>
 BITHUMB_SECRET_KEY=<발급받은 키>
 ```
 
-- 첫 실행 시 계좌 잔고를 기준 자산으로 DB에 자동 저장
-- `LIVE_TRADING_ENABLED=false`면 주문 차단 (안전 장치)
-- 주문 한도: `LIVE_MIN_ORDER_KRW` ~ `LIVE_MAX_ORDER_KRW`
-
-> **기준 자산 리셋:**
-> ```bash
-> uv run python -c "
-> from coin_trading.db.session import SessionLocal
-> from coin_trading.db.models import AppState
-> s = SessionLocal()
-> s.query(AppState).filter_by(key='baseline_equity:KRW-BTC').delete()
-> s.commit()
-> print('리셋 완료')
-> "
-> ```
-
 ### ② 모의 코인 (기본값)
 
 ```bash
@@ -156,7 +140,7 @@ uv run streamlit run src/coin_trading/dashboard.py
 | **신호** | LLM이 생성한 BUY/SELL/HOLD 신호 전체 |
 | **주문** | 실제/가상 주문 기록 |
 
-차트: 매수(녹색 ▲) / 매도(적색 ▼) 마커 포함 캔들스틱
+차트: LONG(녹색 ▲) / SHORT(적색 ▼) / HOLD(회색 O)  마커 포함 캔들스틱
 
 ---
 
@@ -189,7 +173,7 @@ uv run python -m pytest
 
 ---
 
-## 안전 장치
+## 안전 장치 - Risk Engine
 
 - `TRADING_MODE=paper`가 기본값 — 설정 없이 실주문 불가
 - 실주문은 `TRADING_MODE=live` **AND** `LIVE_TRADING_ENABLED=true` 동시 필요
@@ -213,12 +197,4 @@ Ctrl+B, D
 
 # 재접속
 tmux attach -t trading
-
-# 대시보드 별도 창 (같은 세션)
-tmux new-window -t trading
-uv run streamlit run src/coin_trading/dashboard.py
-
-# 창 전환
-Ctrl+B, 0   # 트레이딩
-Ctrl+B, 1   # 대시보드
 ```
