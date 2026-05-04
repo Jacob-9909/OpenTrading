@@ -15,8 +15,8 @@ def utc_now() -> datetime:
 
 
 class SignalSide(StrEnum):
-    BUY = "BUY"
-    SELL = "SELL"
+    LONG = "LONG"
+    SHORT = "SHORT"
     HOLD = "HOLD"
 
 
@@ -32,7 +32,6 @@ class OrderStatus(StrEnum):
 
 
 class PositionSide(StrEnum):
-    SPOT = "SPOT"
     LONG = "LONG"
     SHORT = "SHORT"
 

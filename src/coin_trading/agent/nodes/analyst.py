@@ -1,12 +1,17 @@
 import json
+import logging
+
 from coin_trading.agent.state import AgentState
 from coin_trading.agent.prompts.analyst_prompts import (
     TECHNICAL_ANALYST_SYSTEM_PROMPT,
     SENTIMENT_ANALYST_SYSTEM_PROMPT,
 )
 
+logger = logging.getLogger(__name__)
+
+
 def technical_analyst_node(state: AgentState) -> dict:
-    print("   -> [Node] Technical Analyst is analyzing charts...")
+    logger.info("   -> [Node] Technical Analyst is analyzing charts...")
     llm = state["analyst_llm"]
     context = state["context"]
 
@@ -20,16 +25,12 @@ def technical_analyst_node(state: AgentState) -> dict:
     }
 
     report = llm.chat(TECHNICAL_ANALYST_SYSTEM_PROMPT, json.dumps(tech_context, ensure_ascii=False))
-    print("\n" + "="*50)
-    print("📈 [TECHNICAL REPORT]")
-    print("="*50)
-    print(report)
-    print("="*50 + "\n")
-    print("   <- [Node] Technical Analyst finished.")
+    logger.info("[TECHNICAL REPORT]\n%s", report)
+    logger.info("   <- [Node] Technical Analyst finished.")
     return {"technical_report": report}
 
 def sentiment_analyst_node(state: AgentState) -> dict:
-    print("   -> [Node] Sentiment Analyst is reading news...")
+    logger.info("   -> [Node] Sentiment Analyst is reading news...")
     llm = state["analyst_llm"]
     context = state["context"]
 
@@ -39,10 +40,6 @@ def sentiment_analyst_node(state: AgentState) -> dict:
     }
 
     report = llm.chat(SENTIMENT_ANALYST_SYSTEM_PROMPT, json.dumps(news_context, ensure_ascii=False))
-    print("\n" + "="*50)
-    print("📰 [SENTIMENT REPORT]")
-    print("="*50)
-    print(report)
-    print("="*50 + "\n")
-    print("   <- [Node] Sentiment Analyst finished.")
+    logger.info("[SENTIMENT REPORT]\n%s", report)
+    logger.info("   <- [Node] Sentiment Analyst finished.")
     return {"sentiment_report": report}

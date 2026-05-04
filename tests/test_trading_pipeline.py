@@ -118,6 +118,7 @@ def _session():
 def _pipeline(settings: Settings) -> TradingPipeline:
     pipeline = object.__new__(TradingPipeline)
     pipeline.settings = settings
+    pipeline._ws_active = False
     pipeline.market_data = FakeMarketData()
     pipeline.indicators = FakeIndicators()
     pipeline.news = FakeNews()
@@ -163,17 +164,17 @@ def test_refresh_data_once_updates_data_without_creating_signal() -> None:
     assert result.refreshed_timeframes == ["1h", "4h", "1d", "10m"]
     assert session.query(TradeSignal).count() == 0
     assert pipeline.news.calls == 1
-    assert pipeline.indicators.calls == [
+    assert sorted(pipeline.indicators.calls) == sorted([
         "KRW-BTC:1h:200",
         "KRW-BTC:4h:200",
         "KRW-BTC:1d:200",
-    ]
-    assert pipeline.market_data.calls == [
+    ])
+    assert sorted(pipeline.market_data.calls) == sorted([
         "KRW-BTC:1h:200",
         "KRW-BTC:4h:200",
         "KRW-BTC:1d:200",
         "KRW-BTC:10m:1440",
-    ]
+    ])
 
 
 def test_decide_once_uses_existing_db_data_without_refreshing() -> None:
@@ -208,7 +209,7 @@ def test_decide_once_blocks_stale_market_data() -> None:
         )
     )
     session.commit()
-    pipeline = _pipeline(Settings(max_data_staleness_minutes=180))
+    pipeline = _pipeline(Settings(max_data_staleness_minutes=180, timeframe="1h"))
 
     result = pipeline.decide_once(session)
 
@@ -229,7 +230,7 @@ def test_decide_once_blocks_duplicate_daily_decision() -> None:
         )
     )
     session.commit()
-    pipeline = _pipeline(Settings(scheduler_timezone="Asia/Seoul", decision_cooldown_minutes=1440))
+    pipeline = _pipeline(Settings(scheduler_timezone="Asia/Seoul", decision_cooldown_minutes=1440, timeframe="1h"))
 
     result = pipeline.decide_once(session)
 
@@ -250,7 +251,7 @@ def test_decide_once_allows_duplicate_when_cooldown_is_disabled() -> None:
         )
     )
     session.commit()
-    pipeline = _pipeline(Settings(decision_cooldown_minutes=0))
+    pipeline = _pipeline(Settings(decision_cooldown_minutes=0, timeframe="1h"))
 
     result = pipeline.decide_once(session)
 
@@ -261,6 +262,7 @@ def test_decide_once_allows_duplicate_when_cooldown_is_disabled() -> None:
 
 def test_run_once_refreshes_before_decision() -> None:
     session = _session()
+    _add_fresh_candle(session)
     pipeline = _pipeline(
         Settings(
             symbol="KRW-BTC",
@@ -277,11 +279,11 @@ def test_run_once_refreshes_before_decision() -> None:
 
     assert result.signal_id is not None
     assert result.signal_status == "APPROVED"
-    assert pipeline.market_data.calls == [
+    assert sorted(pipeline.market_data.calls) == sorted([
         "KRW-BTC:1h:200",
         "KRW-BTC:1d:200",
         "KRW-BTC:10m:1440",
-    ]
+    ])
     assert pipeline.news.calls == 1
 
 
@@ -301,4 +303,4 @@ def test_refresh_data_once_uses_larger_limit_when_dashboard_timeframe_matches_tr
     result = pipeline.refresh_data_once(session)
 
     assert result.refreshed_timeframes == ["1h", "1d"]
-    assert pipeline.market_data.calls == ["KRW-BTC:1h:240", "KRW-BTC:1d:200"]
+    assert sorted(pipeline.market_data.calls) == sorted(["KRW-BTC:1h:240", "KRW-BTC:1d:200"])

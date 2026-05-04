@@ -1,16 +1,20 @@
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
 from coin_trading.db.models import MarketCandle
 from coin_trading.market.exchange import Candle, MarketDataClient
 
+if TYPE_CHECKING:
+    from coin_trading.config import Settings
+
 
 class MarketDataCollector:
-    max_fetch_limit = 200
-
-    def __init__(self, client: MarketDataClient) -> None:
+    def __init__(self, client: MarketDataClient, settings: "Settings | None" = None) -> None:
         self.client = client
+        self._max_fetch_limit: int = settings.max_candles_per_fetch if settings else 200
+        self._backfill_max_pages: int = settings.backfill_max_pages if settings else 20
 
     def collect_candles(
         self,
@@ -18,7 +22,7 @@ class MarketDataCollector:
         symbol: str,
         timeframe: str,
         limit: int,
-    ) -> list[MarketCandle]:
+    ) -> list[MarketCandle]:  # returns candles ordered oldest-first
         existing_count = self._candle_count(session, symbol, timeframe)
         if existing_count < limit:
             self._backfill_candles(session, symbol, timeframe, limit)
@@ -35,7 +39,7 @@ class MarketDataCollector:
         candles = self.client.get_klines(
             symbol=symbol,
             interval=timeframe,
-            limit=self.max_fetch_limit,
+            limit=self._max_fetch_limit,
         )
         for candle in candles:
             if latest is None or self._as_utc(candle.open_time) >= self._as_utc(latest.open_time):
@@ -51,9 +55,9 @@ class MarketDataCollector:
         end_time = self._oldest_open_time(session, symbol, timeframe)
         previous_oldest = end_time
         pages = 0
-        while self._candle_count(session, symbol, timeframe) < target_count and pages < 20:
+        while self._candle_count(session, symbol, timeframe) < target_count and pages < self._backfill_max_pages:
             remaining = target_count - self._candle_count(session, symbol, timeframe)
-            fetch_limit = min(self.max_fetch_limit, max(remaining, 1))
+            fetch_limit = min(self._max_fetch_limit, max(remaining, 1))
             candles = self.client.get_klines(
                 symbol=symbol,
                 interval=timeframe,

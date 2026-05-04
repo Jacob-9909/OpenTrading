@@ -38,7 +38,7 @@ def test_live_executor_blocks_when_safety_flag_is_disabled() -> None:
     session = _session()
     signal = TradeSignal(
         symbol="KRW-BTC",
-        side=SignalSide.BUY,
+        side=SignalSide.LONG,
         confidence=0.8,
         entry_price=100_000_000,
         stop_loss=95_000_000,
@@ -62,7 +62,7 @@ def test_live_executor_places_limit_buy_when_enabled() -> None:
     session = _session()
     signal = TradeSignal(
         symbol="KRW-BTC",
-        side=SignalSide.BUY,
+        side=SignalSide.LONG,
         confidence=0.8,
         entry_price=100_000_000,
         stop_loss=95_000_000,
@@ -96,7 +96,7 @@ def test_live_executor_rejects_order_above_live_max_notional() -> None:
     session = _session()
     signal = TradeSignal(
         symbol="KRW-BTC",
-        side=SignalSide.BUY,
+        side=SignalSide.LONG,
         confidence=0.8,
         entry_price=100_000_000,
         stop_loss=95_000_000,

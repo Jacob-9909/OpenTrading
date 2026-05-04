@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     bithumb_secret_key: str | None = None
     bithumb_base_url: str = "https://api.bithumb.com"
 
+    # 시장 데이터 수집
+    max_candles_per_fetch: int = Field(default=200, ge=1)
+    backfill_max_pages: int = Field(default=20, ge=1)
+    news_context_limit: int = Field(default=8, ge=1)
+
+    # 기술 지표
+    indicator_min_candles: int = Field(default=50, ge=10)
+
+    # HTTP
+    exchange_timeout_seconds: float = Field(default=10.0, gt=0)
+
     news_rss_urls: list[str] = Field(
         default_factory=lambda: [
             "https://www.coindesk.com/arc/outboundfeeds/rss/",

@@ -4,9 +4,9 @@ from pydantic import ValidationError
 from coin_trading.agent.schemas import TradingDecision
 
 
-def test_buy_decision_requires_stop_below_entry_and_target_above() -> None:
+def test_long_decision_requires_stop_below_entry_and_target_above() -> None:
     decision = TradingDecision(
-        action="BUY",
+        action="LONG",
         confidence=0.8,
         entry_price=100,
         stop_loss=95,
@@ -16,27 +16,42 @@ def test_buy_decision_requires_stop_below_entry_and_target_above() -> None:
         rationale="valid setup",
     )
 
-    assert decision.action == "BUY"
+    assert decision.action == "LONG"
 
 
-def test_invalid_sell_price_order_is_rejected() -> None:
+def test_short_decision_requires_take_profit_below_entry_and_stop_above() -> None:
+    decision = TradingDecision(
+        action="SHORT",
+        confidence=0.8,
+        entry_price=100,
+        stop_loss=110,
+        take_profit=90,
+        allocation_pct=20,
+        leverage=2,
+        rationale="valid short setup",
+    )
+
+    assert decision.action == "SHORT"
+
+
+def test_invalid_short_price_order_is_rejected() -> None:
     with pytest.raises(ValidationError):
         TradingDecision(
-            action="SELL",
+            action="SHORT",
             confidence=0.8,
             entry_price=100,
             stop_loss=95,
             take_profit=110,
             allocation_pct=20,
             leverage=2,
-            rationale="invalid setup",
+            rationale="invalid short setup (LONG-style ordering)",
         )
 
 
 def test_trade_decision_requires_allocation_pct() -> None:
     with pytest.raises(ValidationError):
         TradingDecision(
-            action="BUY",
+            action="LONG",
             confidence=0.8,
             entry_price=100,
             stop_loss=95,

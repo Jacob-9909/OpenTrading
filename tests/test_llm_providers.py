@@ -94,7 +94,7 @@ class FakeClientWithPayload:
 
 def test_openrouter_normalizes_string_risk_notes() -> None:
     payload = {
-        "action": "BUY",
+        "action": "LONG",
         "confidence": 0.8,
         "entry_price": 100,
         "stop_loss": 95,
@@ -110,13 +110,13 @@ def test_openrouter_normalizes_string_risk_notes() -> None:
 
     result = llm.decide({"latest_price": 100})
 
-    assert result.decision.action == "BUY"
+    assert result.decision.action == "LONG"
     assert result.decision.risk_notes == ["single note"]
 
 
 def test_openrouter_normalizes_null_time_horizon() -> None:
     payload = {
-        "action": "BUY",
+        "action": "LONG",
         "confidence": 0.8,
         "entry_price": 100,
         "stop_loss": 95,
@@ -133,13 +133,13 @@ def test_openrouter_normalizes_null_time_horizon() -> None:
 
     result = llm.decide({"latest_price": 100})
 
-    assert result.decision.action == "BUY"
+    assert result.decision.action == "LONG"
     assert result.decision.time_horizon == "batch"
 
 
 def test_openrouter_normalizes_blank_time_horizon() -> None:
     payload = {
-        "action": "BUY",
+        "action": "LONG",
         "confidence": 0.8,
         "entry_price": 100,
         "stop_loss": 95,
@@ -156,12 +156,13 @@ def test_openrouter_normalizes_blank_time_horizon() -> None:
 
     result = llm.decide({"latest_price": 100})
 
-    assert result.decision.action == "BUY"
+    assert result.decision.action == "LONG"
     assert result.decision.time_horizon == "batch"
 
 
 def test_system_prompt_enforces_position_aware_rules_and_risk_notes_array() -> None:
-    assert "base_asset_quantity" in SYSTEM_PROMPT
+    assert "LONG" in SYSTEM_PROMPT
+    assert "SHORT" in SYSTEM_PROMPT
     assert "risk_notes" in SYSTEM_PROMPT
     assert "array of strings" in SYSTEM_PROMPT
     assert "Never set allocation_pct above portfolio.max_position_allocation_pct." in SYSTEM_PROMPT

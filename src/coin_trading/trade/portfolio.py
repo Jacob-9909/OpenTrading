@@ -142,7 +142,7 @@ class PortfolioService:
 
     @staticmethod
     def _unrealized(position: Position) -> float:
-        if position.side in {PositionSide.LONG, PositionSide.SPOT}:
+        if position.side == PositionSide.LONG:
             return (position.mark_price - position.entry_price) * position.quantity
         return (position.entry_price - position.mark_price) * position.quantity
 

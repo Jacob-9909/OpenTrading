@@ -1,3 +1,5 @@
+import logging
+
 import typer
 
 from coin_trading.config import get_settings
@@ -66,4 +68,8 @@ def serve_all() -> None:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     cli()

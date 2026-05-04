@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class TradingDecision(BaseModel):
-    action: Literal["BUY", "SELL", "HOLD"]
+    action: Literal["LONG", "SHORT", "HOLD"]
     confidence: float = Field(ge=0, le=1)
     entry_price: float | None = Field(default=None, gt=0)
     stop_loss: float | None = Field(default=None, gt=0)
@@ -31,10 +31,10 @@ class TradingDecision(BaseModel):
         ]
         if missing:
             raise ValueError(f"{self.action} decision requires {', '.join(missing)}")
-        if self.action == "BUY" and not (self.stop_loss < self.entry_price < self.take_profit):
-            raise ValueError("BUY requires stop_loss < entry_price < take_profit")
-        if self.action == "SELL" and not (self.take_profit < self.entry_price < self.stop_loss):
-            raise ValueError("SELL requires take_profit < entry_price < stop_loss")
+        if self.action == "LONG" and not (self.stop_loss < self.entry_price < self.take_profit):
+            raise ValueError("LONG requires stop_loss < entry_price < take_profit")
+        if self.action == "SHORT" and not (self.take_profit < self.entry_price < self.stop_loss):
+            raise ValueError("SHORT requires take_profit < entry_price < stop_loss (price above TP and below SL)")
         return self
 
 

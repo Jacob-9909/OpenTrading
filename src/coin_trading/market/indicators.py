@@ -7,6 +7,26 @@ from sqlalchemy.orm import Session
 from coin_trading.db.models import IndicatorSnapshot, MarketCandle
 
 
+def timeframe_minutes(timeframe: str) -> int:
+    """Convert a timeframe string to its duration in minutes."""
+    mapping = {
+        "1m": 1,
+        "3m": 3,
+        "5m": 5,
+        "10m": 10,
+        "15m": 15,
+        "30m": 30,
+        "1h": 60,
+        "4h": 240,
+        "1d": 1440,
+        "day": 1440,
+        "days": 1440,
+    }
+    if timeframe not in mapping:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    return mapping[timeframe]
+
+
 class IndicatorCalculator:
     def calculate_latest(
         self,

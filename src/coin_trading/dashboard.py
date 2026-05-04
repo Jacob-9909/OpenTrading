@@ -10,6 +10,7 @@ from coin_trading.db.models import (
     MarketCandle,
     PaperOrder,
     Position,
+    PositionSide,
     PositionStatus,
     RiskEvent,
     TradeSignal,
@@ -17,6 +18,7 @@ from coin_trading.db.models import (
 from coin_trading.db.session import SessionLocal, init_db
 from coin_trading.market.exchange import create_exchange_client
 from coin_trading.market import MarketDataCollector
+from coin_trading.market.indicators import timeframe_minutes
 from coin_trading.trade import PortfolioService
 
 
@@ -68,9 +70,16 @@ def main() -> None:
         c5.metric("초기 자산", _money(_baseline_equity(session, settings, portfolio.equity), currency))
 
         # ── Row 2: position detail ────────────────────────────────────────────
+        open_positions_query = (
+            session.query(Position)
+            .filter_by(symbol=settings.symbol, status=PositionStatus.OPEN)
+            .all()
+        )
+        long_positions = [p for p in open_positions_query if p.side == PositionSide.LONG]
+        short_positions = [p for p in open_positions_query if p.side == PositionSide.SHORT]
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric("보유 수량", f"{portfolio.base_asset_quantity:.6g}")
-        p2.metric("평균 매수가", _money(portfolio.avg_entry_price, currency))
+        p1.metric("LONG 수량", f"{sum(p.quantity for p in long_positions):.6g}")
+        p2.metric("SHORT 수량", f"{sum(p.quantity for p in short_positions):.6g}")
         p3.metric("포지션 수익률", f"{portfolio.position_return_pct:+.2f}%")
         p4.metric("사용 가능 현금", _money(portfolio.cash_available, currency))
 
@@ -463,11 +472,13 @@ def _open_position_rows(positions: list[Position], currency: str) -> pd.DataFram
     rows = []
     for pos in positions:
         cost = pos.entry_price * pos.quantity if pos.entry_price and pos.quantity else 0
-        unrealized_pct = (
-            (pos.mark_price / pos.entry_price - 1) * 100
-            if pos.entry_price and pos.mark_price and pos.side.value in {"SPOT", "LONG"}
-            else 0
-        )
+        if pos.entry_price and pos.mark_price:
+            if pos.side == PositionSide.LONG:
+                unrealized_pct = (pos.mark_price / pos.entry_price - 1) * 100
+            else:  # SHORT
+                unrealized_pct = (pos.entry_price / pos.mark_price - 1) * 100
+        else:
+            unrealized_pct = 0
         rows.append({
             "종목": pos.symbol,
             "방향": pos.side.value,
@@ -526,18 +537,11 @@ def _chart_candles(session, symbol: str, timeframe: str, limit: int) -> list[Mar
 
 
 def _raw_chart_candle_limit(days: int, timeframe: str) -> int:
-    return max(int((days * 24 * 60) / _timeframe_minutes(timeframe)), 1)
+    return max(int((days * 24 * 60) / timeframe_minutes(timeframe)), 1)
 
 
 def _chart_candle_limit(days: int, timeframe: str) -> int:
     return min(_raw_chart_candle_limit(days, timeframe), 4_000)
-
-
-def _timeframe_minutes(timeframe: str) -> int:
-    mapping = {"1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "1h": 60, "4h": 240}
-    if timeframe not in mapping:
-        raise ValueError(f"Unsupported dashboard timeframe: {timeframe}")
-    return mapping[timeframe]
 
 
 def _orders_in_range(orders: list[PaperOrder], start, end) -> pd.DataFrame:

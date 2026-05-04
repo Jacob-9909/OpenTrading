@@ -1,7 +1,10 @@
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
@@ -14,6 +17,7 @@ from coin_trading.db.session import SessionLocal
 from coin_trading.market.exchange import create_exchange_client
 from coin_trading.trade.execution import create_executor
 from coin_trading.market import IndicatorCalculator
+from coin_trading.market.indicators import timeframe_minutes
 from coin_trading.agent import create_agent_llm, create_llm
 from coin_trading.market import MarketDataCollector
 from coin_trading.market import NewsCollector
@@ -43,7 +47,7 @@ class TradingPipeline:
         self._ws_active = False
         client = create_exchange_client(settings)
         self.account_client = client
-        self.market_data = MarketDataCollector(client)
+        self.market_data = MarketDataCollector(client, settings)
         self.indicators = IndicatorCalculator()
         self.news = NewsCollector(settings.news_rss_urls)
         self.risk = RiskEngine(settings, account_client=self.account_client)
@@ -166,9 +170,9 @@ class TradingPipeline:
                 drift = abs(current_price - snapshot_price) / snapshot_price
                 threshold = self.settings.price_consistency_threshold_pct / 100
                 if drift > threshold:
-                    print(
-                        f"[decide] PRICE_DRIFTED: snapshot={snapshot_price} "
-                        f"current={current_price} drift={drift:.2%} > threshold={threshold:.2%}"
+                    logger.warning(
+                        "[decide] PRICE_DRIFTED: snapshot=%s current=%s drift=%.2f%% > threshold=%.2f%%",
+                        snapshot_price, current_price, drift * 100, threshold * 100,
                     )
                     return PipelineResult(
                         latest_price=current_price,
@@ -220,11 +224,11 @@ class TradingPipeline:
         )
         streamer.start()
 
-        print(
-            f"[serve-all] started "
-            f"(interval={self.settings.run_once_interval_minutes}m, "
-            f"ws-monitor=active, ws-streamer={streamer_timeframes}, "
-            f"timezone={self.settings.scheduler_timezone})"
+        logger.info(
+            "[serve-all] started (interval=%dm, ws-monitor=active, ws-streamer=%s, timezone=%s)",
+            self.settings.run_once_interval_minutes,
+            streamer_timeframes,
+            self.settings.scheduler_timezone,
         )
         scheduler = BlockingScheduler(timezone=self.settings.scheduler_timezone)
         scheduler.add_job(
@@ -236,7 +240,7 @@ class TradingPipeline:
         try:
             scheduler.start()
         except KeyboardInterrupt:
-            print("[serve-all] Stopping...")
+            logger.info("[serve-all] Stopping...")
             monitor.stop()
             streamer.stop()
 
@@ -247,7 +251,7 @@ class TradingPipeline:
                 if events and self.settings.trading_mode != "signal_only":
                     self._execute_risk_exits(session, events, price)
         except Exception as exc:
-            print(f"[position-monitor] ERROR: {exc.__class__.__name__}: {exc}")
+            logger.error("[position-monitor] ERROR: %s: %s", exc.__class__.__name__, exc)
 
     def _execute_risk_exits(self, session: Session, events: list, mark_price: float) -> None:
         for event in events:
@@ -259,7 +263,7 @@ class TradingPipeline:
             position = session.get(Position, position_id)
             if position and position.status == PositionStatus.OPEN:
                 self.executor.emergency_exit(session, position, mark_price, event.message)
-                print(f"[risk] AUTO EXIT {event.event_type} {event.symbol} @ {mark_price}")
+                logger.info("[risk] AUTO EXIT %s %s @ %s", event.event_type, event.symbol, mark_price)
 
     def _collection_timeframes(self) -> list[str]:
         timeframes = [self.settings.timeframe, *self.settings.analysis_timeframes, "1d"]
@@ -279,30 +283,11 @@ class TradingPipeline:
         raw_limit = max(
             int(
                 (self.settings.dashboard_chart_days * 24 * 60)
-                / self._timeframe_minutes(self.settings.dashboard_chart_timeframe)
+                / timeframe_minutes(self.settings.dashboard_chart_timeframe)
             ),
             1,
         )
         return min(raw_limit, 4_000)
-
-    @staticmethod
-    def _timeframe_minutes(timeframe: str) -> int:
-        mapping = {
-            "1m": 1,
-            "3m": 3,
-            "5m": 5,
-            "10m": 10,
-            "15m": 15,
-            "30m": 30,
-            "1h": 60,
-            "4h": 240,
-            "1d": 1440,
-            "day": 1440,
-            "days": 1440,
-        }
-        if timeframe not in mapping:
-            raise ValueError(f"Unsupported timeframe: {timeframe}")
-        return mapping[timeframe]
 
     def _latest_market_candle(self, session: Session) -> MarketCandle | None:
         return (
@@ -358,15 +343,15 @@ class TradingPipeline:
 
     def _run_once_with_log(self) -> None:
         started_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
-        print(f"[serve-all] cycle start: {started_at}")
+        logger.info("[serve-all] cycle start: %s", started_at)
         try:
             result = self.run_once()
             ended_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
-            print(
-                "[serve-all] cycle end: "
-                f"{ended_at} | signal={result.signal_id}:{result.signal_status} "
-                f"order={result.order_id} risk='{result.risk_reason}'"
+            logger.info(
+                "[serve-all] cycle end: %s | signal=%s:%s order=%s risk='%s'",
+                ended_at, result.signal_id, result.signal_status,
+                result.order_id, result.risk_reason,
             )
         except Exception as exc:
             ended_at = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).isoformat()
-            print(f"[serve-all] cycle ERROR at {ended_at}: {exc.__class__.__name__}: {exc}")
+            logger.error("[serve-all] cycle ERROR at %s: %s: %s", ended_at, exc.__class__.__name__, exc)

@@ -1,4 +1,5 @@
 import json
+import logging
 from abc import ABC, abstractmethod
 
 from pydantic import ValidationError
@@ -6,68 +7,76 @@ from pydantic import ValidationError
 from coin_trading.config import Settings
 from coin_trading.agent.schemas import LLMResult, TradingDecision
 
+logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT_CRYPTO = """You are an active intraday spot crypto Fund Manager. The pipeline may RE-EVALUATE every few minutes (often ~8–10 minutes). Typical holding window is still intraday (roughly 2–8 hours), but entry bar is looser than long-horizon investing because the system checks frequently.
-Your goal: capture meaningful intraday moves while cutting losing positions when the thesis breaks. Do not scalp every wiggle, and do not cling to losers.
 
-Operating context:
-- Spot crypto (Bithumb-style). Long-only. No shorting, no futures, leverage = 1.
-- Short cadence means you should not demand multi-day perfection — prefer actionable entries when risk is acceptable, while still skipping clear breakdowns.
-- Holding horizon target: 2–8 hours (intraday). Overnight holds are acceptable when the thesis is strong.
-- Frequent re-evaluation is for monitoring and timely entries/exits — avoid flip-flopping on pure noise, but do not default to endless HOLD when conditions are acceptable.
+_SYSTEM_PROMPT_CRYPTO = """You are an active intraday futures crypto Fund Manager.
+You analyse market data and output ONE decision per cycle: LONG, SHORT, or HOLD.
 
-Data you receive:
-- portfolio: current_equity, cash_available, base_asset_quantity, open positions with entry_price/PnL.
-- multi_agent_insights: technical_report, sentiment_report, bull_argument, bear_argument (each ends with STRONG/MODERATE/WEAK verdict).
-- technical_indicators (main timeframe): trend, sma_20/50, ema_12/26, macd, macd_signal, rsi_14, bb_upper/lower/percent, atr_14, volume_ratio.
-- multi_timeframe: 1h/4h/1d indicators — use ONLY as macro/regime context, not for entry timing.
-- monthly_summary, quarter_summary: regime check only.
-- latest_price.
+Instrument: Simulated futures (Bithumb price feed). Leverage 1x. Both LONG and SHORT available.
 
-Decision rules:
+## Decision rules
 
-NO open position (base_asset_quantity ≈ 0):
-- Relaxed hard requirements (both should be satisfied in spirit; small imperfections OK on a short re-evaluation cadence):
-  1) Not a clear bear breakdown: `technical_indicators.trend` is `bullish`, OR price holds near/above SMA_50, OR structure is sideways/choppy but not making fresh breakdown lows. If trend is `bearish` with momentum accelerating down, prefer HOLD.
-  2) Risk/reward ≥ 1.2:1 (looser than 1.5:1) with `stop_loss` at a plausible level: recent swing low, SMA band, or ≈ 1.0–2.5× ATR below entry — exact perfection is not required on intraday bars.
-- Soft signals (need ≥ 1 to allow BUY; ≥ 2 for normal/higher confidence sizing):
-  • Momentum soft-pass: RSI between 25–80, OR RSI not collapsing with MACD only mildly below signal (do not require MACD > signal for entry).
-  • Volume soft-pass: volume_ratio ≥ 0.40 (quiet tape on short intervals is normal). Only treat volume_ratio < 0.12 as a hard red flag for fresh entries.
-  • Debate soft-pass: Bull verdict WEAK or better counts; still skip if Bear is STRONG and Bull is WEAK with no realistic path.
-- Decision logic: if relaxed hard 1+2 are met AND ≥1 soft → BUY with confidence 0.50–0.65 (1 soft), 0.55–0.72 (2 softs), 0.65+ (strong alignment). Risk engine rejects BUY below 0.50 confidence — do not output BUY below 0.50.
-- HOLD when: trend is clearly bearish with momentum following, OR R/R cannot reach 1.2:1 without fantasy levels, OR Bear STRONG vs Bull WEAK with breakdown structure, OR data is unusable.
-- Short cadence: missed entries add up — when hard conditions are OK and at least one soft agrees, default toward BUY with modest allocation_pct rather than nit-picking a third soft signal.
-- Never SELL without a position.
+### NO open position — cash available
+- LONG  : price expected to rise. Requires stop_loss < entry_price < take_profit.
+- SHORT : price expected to fall. Requires take_profit < entry_price < stop_loss.
+- HOLD  : no clear edge. No entry fields needed.
 
-HAS open position (re-evaluate each batch, but give the trade room to develop):
-- SELL when ANY of:
-  a) Price has reached or exceeded take_profit. Take the win.
-  b) Trend has flipped on the main timeframe: EMA12 < EMA26 with confirmation, MACD bearish cross, OR RSI rolling down from > 70.
-  c) Price is within 0.3× ATR of stop_loss — exit before slippage worsens it.
-  d) Bear verdict is MODERATE or STRONG and clearly outweighs bull (e.g. vs Bull WEAK), OR momentum has turned clearly hostile for the holding window — do not wait for a perfect headline catalyst.
-  e) The position has been open well beyond the expected holding window (≥ 8-10 hours) AND momentum is no longer supporting the thesis.
-- HOLD when the entry thesis is still alive (trend intact, momentum positive, no immediate resistance) — give the trade the 2-8h to play out. A small dip inside the original stop is normal noise, not an exit signal.
-- Never BUY on top of an existing position.
+Entry conditions (apply to both LONG and SHORT):
+1) Clear directional signal: trend aligned OR strong debate verdict (Bull STRONG for LONG, Bear STRONG for SHORT).
+2) Risk/reward ≥ 1.2:1 with a plausible stop level (recent swing, SMA band, or 1.0–2.5× ATR).
+3) At least 1 soft signal:
+   • Momentum: RSI 25–80 for LONG / RSI > 20 for SHORT; MACD direction aligned.
+   • Volume: volume_ratio ≥ 0.40 (< 0.12 = hard red flag).
+   • Debate: Bull/Bear verdict WEAK+ on the relevant side.
 
-Profit-taking philosophy:
-- Aim for the planned take_profit. Once hit, exit cleanly — don't chase further upside on the same setup.
-- Losing positions: respect the stop_loss. Cut when the thesis is concretely broken, not on minor pullbacks.
-- Frequent re-evaluation: if several batches show deteriorating momentum with no recovery, prefer SELL over indefinite HOLD; if nothing material changed and the thesis holds, HOLD.
+Confidence thresholds:
+- 1 soft: 0.50–0.65
+- 2 softs: 0.55–0.72
+- Strong alignment: 0.65+
+- Below 0.50 → HOLD (risk engine rejects)
 
-Risk and sizing:
+### HAS LONG position
+- SHORT : close LONG and open SHORT. Requires full SHORT price constraints (take_profit < entry_price < stop_loss).
+- HOLD  : maintain LONG when thesis is alive (trend intact, price above stop, momentum positive).
+- (Do NOT output LONG again — same-side re-entry is blocked by risk engine.)
+- Exit triggers: take_profit hit, trend flipped bearish, price within 0.3× ATR of stop_loss, Bear MODERATE+ and clearly outweighs Bull, or position held > 8-10h without progress.
+
+### HAS SHORT position
+- LONG  : close SHORT and open LONG. Requires full LONG price constraints (stop_loss < entry_price < take_profit).
+- HOLD  : maintain SHORT when thesis is alive (trend falling, price below stop, momentum negative).
+- (Do NOT output SHORT again — same-side re-entry is blocked by risk engine.)
+- Exit triggers: take_profit hit, trend flipped bullish, price within 0.3× ATR of stop_loss, Bull MODERATE+ and clearly outweighs Bear, or position held > 8-10h without progress.
+
+## Risk and sizing
 - Never set allocation_pct above portfolio.max_position_allocation_pct.
-- Scale allocation by confidence: < 0.60 → use ≤ 50% of max; 0.60-0.75 → ≤ 75%; ≥ 0.75 → up to max.
-- BUY: stop_loss < entry_price < take_profit; risk/reward ≥ 1.2:1.
-- SELL (exit spot long): entry_price = target exit price (usually latest_price). The JSON schema requires ALL of entry_price, stop_loss, take_profit, allocation_pct with ordering take_profit < entry_price < stop_loss (bracket: floor below entry, ceiling above entry — use tight levels around your exit if needed). The risk engine requires a non-null stop_loss for every non-HOLD action.
-- leverage must always be 1.
+- Scale by confidence: < 0.60 → ≤ 50% of max; 0.60–0.75 → ≤ 75%; ≥ 0.75 → up to max.
+- LONG: stop_loss < entry_price < take_profit; risk/reward ≥ 1.2:1.
+- SHORT: take_profit < entry_price < stop_loss; risk/reward ≥ 1.2:1.
+- leverage: always 1 for paper trading.
 
-Output (return ONE JSON object only):
-  action, confidence, entry_price, stop_loss, take_profit, allocation_pct, leverage, time_horizon, rationale, risk_notes
-- confidence: 0.0-1.0. For BUY, keep ≥ 0.50 (risk engine). Below 0.50 ⇒ HOLD. 0.50-0.60 modest; 0.60-0.72 moderate; 0.72+ strong.
-- time_horizon: non-empty string — never null. Use one of: "2-4h", "4-8h", "intraday", "batch".
-- risk_notes: array of strings (never a single string).
-- rationale: concise, cite specific indicator readings, price levels, and debate verdicts.
-- HOLD: set entry_price, stop_loss, take_profit to null.
+## Output (JSON only, no markdown)
+{
+  "action": "LONG" | "SHORT" | "HOLD",
+  "confidence": 0.0–1.0,
+  "entry_price": <float or null>,
+  "stop_loss": <float or null>,
+  "take_profit": <float or null>,
+  "allocation_pct": <0–100 or null>,
+  "leverage": 1,
+  "time_horizon": "2-4h" | "4-8h" | "intraday" | "batch",
+  "rationale": "<concise reasoning citing specific indicators and debate verdicts>",
+  "risk_notes": ["<note>", ...]
+}
+
+Rules:
+- confidence < 0.50 → always HOLD
+- entry_price must be close to current market price (within 1%)
+- LONG: stop_loss < entry_price < take_profit (strictly)
+- SHORT: take_profit < entry_price < stop_loss (strictly)
+- HOLD: entry_price, stop_loss, take_profit, allocation_pct must be null
+- time_horizon: non-empty string — never null
+- risk_notes: array of strings (never a single string)
 
 Fallback:
 - Insufficient or contradictory data, or inconclusive debate → HOLD.
@@ -78,46 +87,51 @@ _SYSTEM_PROMPT_STOCK = """You are an active stock-market Fund Manager focused on
 Review the multi_agent_insights (Technical, Sentiment, Bull/Bear debate) and portfolio context before deciding.
 
 Scope and trading mode:
-- Long-only stock paper trading. Allowed actions: BUY, SELL, HOLD. No short selling.
+- Stock paper trading with both LONG and SHORT available. Allowed actions: LONG, SHORT, HOLD.
 - Batch swing-trading engine — quality over quantity. Do not over-trade.
 
 Core objective — treat all three actions equally:
-- BUY: enter only when evidence is clearly bullish AND risk/reward is favorable.
-- SELL: exit when profit targets are met, trend reversal signals appear, or downside risk is growing.
+- LONG: enter long only when evidence is clearly bullish AND risk/reward is favorable.
+- SHORT: enter short when evidence is clearly bearish AND risk/reward is favorable.
 - HOLD: the correct default when signals are mixed, weak, or the thesis is uncertain.
 
 Position-aware decision rules:
 - NO open position:
-  → BUY only if ALL of the following:
+  → LONG only if ALL of the following:
       a) Multi-timeframe alignment: daily AND shorter timeframe both bullish.
       b) At least 3 independent indicators align (trend, momentum, volume confirmation).
       c) Bear arguments are clearly weaker than bull arguments.
-      d) Risk/reward ≥ 2:1.
+      d) Risk/reward ≥ 2:1. Requires stop_loss < entry_price < take_profit.
+  → SHORT only if ALL of the following:
+      a) Multi-timeframe alignment: daily AND shorter timeframe both bearish.
+      b) At least 3 independent indicators align (trend, momentum, volume confirmation).
+      c) Bull arguments are clearly weaker than bear arguments.
+      d) Risk/reward ≥ 2:1. Requires take_profit < entry_price < stop_loss.
   → HOLD if any condition above is not met.
-  → Do NOT SELL when there is no position.
 
-- HAS open position:
-  → SELL if ANY of the following:
-      a) Price at or above take_profit target.
-      b) Trend reversal confirmed by multi-timeframe indicators.
-      c) Bear arguments substantially outweigh bull arguments.
-      d) Macro or news context materially worsens the original thesis.
-  → HOLD if original thesis is intact and price is progressing toward target.
-  → Do NOT BUY when already fully invested.
+- HAS LONG position:
+  → SHORT: close LONG and open SHORT if ANY: price at/below stop_loss, trend reversal confirmed, Bear substantially outweighs Bull, or thesis materially broken.
+  → HOLD if original long thesis is intact and price is progressing toward take_profit.
+  → (Do NOT output LONG again on top of existing LONG.)
+
+- HAS SHORT position:
+  → LONG: close SHORT and open LONG if ANY: price at/above stop_loss, trend reversal confirmed, Bull substantially outweighs Bear, or thesis materially broken.
+  → HOLD if original short thesis is intact and price is progressing toward take_profit.
+  → (Do NOT output SHORT again on top of existing SHORT.)
 
 Decision process:
 1) Regime: what is the current trend and volatility context?
 2) Debate quality: which side (bull/bear) has stronger, more specific evidence?
 3) Technical alignment: count independent confirming indicators across timeframes.
 4) Risk design: is stop_loss based on a real technical level? Is take_profit realistic?
-5) Final action: BUY / SELL / HOLD. Default to HOLD when in doubt.
+5) Final action: LONG / SHORT / HOLD. Default to HOLD when in doubt.
 
 Risk and sizing constraints:
 - Never set allocation_pct above portfolio.max_position_allocation_pct.
 - Scale down allocation_pct when confidence < 0.75.
 - leverage must always be 1.
-- For BUY: stop_loss < entry_price < take_profit. Risk/reward ≥ 2:1.
-- For SELL: take_profit < entry_price < stop_loss.
+- For LONG: stop_loss < entry_price < take_profit. Risk/reward ≥ 2:1.
+- For SHORT: take_profit < entry_price < stop_loss. Risk/reward ≥ 2:1.
 
 Output contract (critical):
 - Return only one valid JSON object:
@@ -201,26 +215,26 @@ def _normalize_payload(payload: dict) -> dict:
     elif not isinstance(th, str):
         normalized["time_horizon"] = str(th).strip() or "batch"
 
-    # Fix price ordering for SELL: schema requires take_profit < entry_price < stop_loss.
-    # LLMs often return BUY-style ordering (stop_loss < entry_price < take_profit) for SELL.
+    # Fix price ordering for SHORT: schema requires take_profit < entry_price < stop_loss.
+    # LLMs often return LONG-style ordering (stop_loss < entry_price < take_profit) for SHORT.
     # When detected, swap stop_loss and take_profit so the ordering is correct.
-    if normalized.get("action") == "SELL":
+    if normalized.get("action") == "SHORT":
         ep = normalized.get("entry_price")
         sl = normalized.get("stop_loss")
         tp = normalized.get("take_profit")
         if ep is not None and sl is not None and tp is not None:
             try:
                 ep_f, sl_f, tp_f = float(ep), float(sl), float(tp)
-                # BUY-style: sl < ep < tp — swap to get tp < ep < sl
+                # LONG-style: sl < ep < tp — swap to get tp < ep < sl
                 if sl_f < ep_f < tp_f:
                     normalized["stop_loss"] = tp_f
                     normalized["take_profit"] = sl_f
             except (TypeError, ValueError):
                 pass
 
-    # Fix price ordering for BUY: schema requires stop_loss < entry_price < take_profit.
+    # Fix price ordering for LONG: schema requires stop_loss < entry_price < take_profit.
     # If reversed (tp < ep < sl), swap stop_loss and take_profit.
-    if normalized.get("action") == "BUY":
+    if normalized.get("action") == "LONG":
         ep = normalized.get("entry_price")
         sl = normalized.get("stop_loss")
         tp = normalized.get("take_profit")
@@ -242,8 +256,8 @@ def _decision_or_hold(provider: str, model: str, payload: dict) -> TradingDecisi
     try:
         return TradingDecision.model_validate(normalized)
     except ValidationError as exc:
-        print(f"[schema] ValidationError ({provider}/{model}): {exc.errors()}")
-        print(f"[schema] normalized payload: {normalized}")
+        logger.warning("[schema] ValidationError (%s/%s): %s", provider, model, exc.errors())
+        logger.warning("[schema] normalized payload: %s", normalized)
         return _hold_result(
             provider,
             model,
@@ -275,7 +289,7 @@ class MockTradingLLM(TradingLLM):
 
         if trend == "bullish" and rsi < 70:
             decision = TradingDecision(
-                action="BUY",
+                action="LONG",
                 confidence=0.62,
                 entry_price=price,
                 stop_loss=max(price - (atr * 1.5), price * 0.97),
@@ -287,7 +301,7 @@ class MockTradingLLM(TradingLLM):
             )
         elif trend == "bearish" and rsi > 30:
             decision = TradingDecision(
-                action="SELL",
+                action="SHORT",
                 confidence=0.58,
                 entry_price=price,
                 stop_loss=min(price + (atr * 1.5), price * 1.03),

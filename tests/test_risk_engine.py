@@ -48,7 +48,7 @@ def test_risk_engine_rejects_excessive_leverage() -> None:
     settings = Settings(portfolio_source="paper", max_leverage=3)
     signal = TradeSignal(
         symbol="BTCUSDT",
-        side=SignalSide.BUY,
+        side=SignalSide.LONG,
         confidence=0.8,
         entry_price=100,
         stop_loss=95,
@@ -72,7 +72,7 @@ def test_risk_engine_approves_conservative_signal() -> None:
     )
     signal = TradeSignal(
         symbol="BTCUSDT",
-        side=SignalSide.BUY,
+        side=SignalSide.LONG,
         confidence=0.8,
         entry_price=100,
         stop_loss=95,
@@ -98,7 +98,7 @@ def test_risk_engine_caps_quantity_by_llm_allocation_pct() -> None:
     )
     signal = TradeSignal(
         symbol="KRW-BTC",
-        side=SignalSide.BUY,
+        side=SignalSide.LONG,
         confidence=0.8,
         entry_price=100,
         stop_loss=99,
@@ -114,42 +114,41 @@ def test_risk_engine_caps_quantity_by_llm_allocation_pct() -> None:
     assert approval.quantity == 1
 
 
-def test_risk_engine_uses_exchange_available_balance_for_spot_sell() -> None:
+def test_risk_engine_approves_short_signal() -> None:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     signal = TradeSignal(
         symbol="KRW-BTC",
-        side=SignalSide.SELL,
+        side=SignalSide.SHORT,
         confidence=0.8,
         entry_price=100_000_000,
         stop_loss=105_000_000,
         take_profit=95_000_000,
         leverage=1,
-        rationale="exit spot position",
+        rationale="short position",
     )
-    signal.allocation_pct = 100
+    signal.allocation_pct = 10
     session.add(signal)
     session.commit()
 
     approval = RiskEngine(
-        Settings(portfolio_source="exchange", exchange="bithumb_spot"),
-        account_client=FakeAccountClient(),
+        Settings(portfolio_source="paper", exchange="bithumb_spot", initial_equity=200_000_000),
     ).evaluate(session, signal, mark_price=100_000_000)
 
     assert approval.approved is True
-    assert approval.quantity == 0.01
+    assert approval.quantity > 0
 
 
-def test_risk_engine_allows_second_bithumb_spot_buy_when_position_exists() -> None:
-    """BUY approved even when an open position already exists (no position-count limit)."""
+def test_risk_engine_allows_long_when_position_exists() -> None:
+    """LONG approved even when an open long position already exists (no position-count limit)."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     session.add(
         Position(
             symbol="KRW-BTC",
-            side=PositionSide.SPOT,
+            side=PositionSide.LONG,
             status=PositionStatus.OPEN,
             quantity=0.001,
             entry_price=100_000_000.0,
@@ -166,13 +165,13 @@ def test_risk_engine_allows_second_bithumb_spot_buy_when_position_exists() -> No
     )
     signal = TradeSignal(
         symbol="KRW-BTC",
-        side=SignalSide.BUY,
+        side=SignalSide.LONG,
         confidence=0.8,
         entry_price=100_000_000.0,
         stop_loss=98_000_000.0,
         take_profit=105_000_000.0,
         leverage=1,
-        rationale="add-on buy",
+        rationale="add-on long",
     )
     signal.allocation_pct = 10
     session.add(signal)

@@ -71,16 +71,12 @@ class RiskEngine:
                 )
                 return RiskApproval(False, reason, liquidation_price=liquidation_price)
 
-        quantity = (
-            self._spot_sell_quantity(session, signal.symbol, mark_price)
-            if signal.side == SignalSide.SELL and self.settings.exchange == "bithumb_spot"
-            else self._position_quantity(
-                session,
-                signal,
-                entry_price=entry,
-                stop_loss=stop_loss,
-                mark_price=mark_price,
-            )
+        quantity = self._position_quantity(
+            session,
+            signal,
+            entry_price=entry,
+            stop_loss=stop_loss,
+            mark_price=mark_price,
         )
         signal.status = "APPROVED"
         session.commit()
@@ -97,10 +93,15 @@ class RiskEngine:
         for position in positions:
             position.mark_price = mark_price
             position.unrealized_pnl = self._unrealized_pnl(position, mark_price)
-            if self.settings.trailing_stop_pct and position.side in {PositionSide.LONG, PositionSide.SPOT}:
-                new_stop = round(mark_price * (1 - self.settings.trailing_stop_pct), 8)
-                if position.stop_loss is None or new_stop > position.stop_loss:
-                    position.stop_loss = new_stop
+            if self.settings.trailing_stop_pct:
+                if position.side == PositionSide.LONG:
+                    new_stop = round(mark_price * (1 - self.settings.trailing_stop_pct), 8)
+                    if position.stop_loss is None or new_stop > position.stop_loss:
+                        position.stop_loss = new_stop
+                elif position.side == PositionSide.SHORT:
+                    new_stop = round(mark_price * (1 + self.settings.trailing_stop_pct), 8)
+                    if position.stop_loss is None or new_stop < position.stop_loss:
+                        position.stop_loss = new_stop
             if self._hit_stop_loss(position, mark_price):
                 events.append(self._event(symbol, RiskEventType.STOP_LOSS, "Stop loss reached.", position))
             elif self._hit_take_profit(position, mark_price):
@@ -129,7 +130,7 @@ class RiskEngine:
         leverage: int,
     ) -> float:
         margin_ratio = 1 / max(leverage, 1)
-        if side in {PositionSide.LONG, PositionSide.SPOT}:
+        if side == PositionSide.LONG:
             return entry_price * (1 - margin_ratio)
         return entry_price * (1 + margin_ratio)
 
@@ -141,14 +142,10 @@ class RiskEngine:
     ) -> str | None:
         if signal.leverage > self.settings.max_leverage:
             return f"Leverage {signal.leverage} exceeds max {self.settings.max_leverage}."
-        if self.settings.exchange == "bithumb_spot" and signal.side == SignalSide.SELL:
-            if self._spot_sell_quantity(session, signal.symbol, mark_price) <= 0:
-                return "No open spot position to sell."
-            return None
-        if signal.side == SignalSide.BUY and self._kill_switch_active(session, signal.symbol, mark_price):
+        if signal.side in {SignalSide.LONG, SignalSide.SHORT} and self._kill_switch_active(session, signal.symbol, mark_price):
             return f"Kill switch: portfolio drawdown exceeds {self.settings.kill_switch_drawdown:.0%}."
         if self._reentry_cooldown_active(session, signal):
-            return f"Re-entry cooldown: {self.settings.reentry_cooldown_minutes}m after last SELL."
+            return f"Re-entry cooldown: {self.settings.reentry_cooldown_minutes}m after last trade."
         if signal.confidence < 0.50:
             return "Signal confidence is below minimum threshold (0.50)."
         return None
@@ -185,25 +182,6 @@ class RiskEngine:
         )
         return snapshot.equity
 
-    def _open_spot_quantity(self, session: Session, symbol: str) -> float:
-        positions = (
-            session.query(Position)
-            .filter_by(symbol=symbol, status=PositionStatus.OPEN)
-            .all()
-        )
-        return round(sum(position.quantity for position in positions), 6)
-
-    def _spot_sell_quantity(self, session: Session, symbol: str, mark_price: float) -> float:
-        if self.settings.portfolio_source == "exchange" and self.account_client:
-            snapshot = PortfolioService(self.settings, self.account_client).snapshot(
-                session,
-                symbol=symbol,
-                mark_price=mark_price,
-            )
-            available_quantity = snapshot.base_asset_quantity - snapshot.base_locked
-            return round(max(available_quantity, 0), 6)
-        return self._open_spot_quantity(session, symbol)
-
     def _record_rejection(
         self,
         session: Session,
@@ -225,7 +203,7 @@ class RiskEngine:
 
     @staticmethod
     def _unrealized_pnl(position: Position, mark_price: float) -> float:
-        if position.side in {PositionSide.LONG, PositionSide.SPOT}:
+        if position.side == PositionSide.LONG:
             return (mark_price - position.entry_price) * position.quantity
         return (position.entry_price - mark_price) * position.quantity
 
@@ -234,7 +212,7 @@ class RiskEngine:
         if position.stop_loss is None:
             return False
         return (
-            position.side in {PositionSide.LONG, PositionSide.SPOT}
+            position.side == PositionSide.LONG
             and mark_price <= position.stop_loss
             or position.side == PositionSide.SHORT
             and mark_price >= position.stop_loss
@@ -245,7 +223,7 @@ class RiskEngine:
         if position.take_profit is None:
             return False
         return (
-            position.side in {PositionSide.LONG, PositionSide.SPOT}
+            position.side == PositionSide.LONG
             and mark_price >= position.take_profit
             or position.side == PositionSide.SHORT
             and mark_price <= position.take_profit
@@ -277,26 +255,22 @@ class RiskEngine:
         return (current - baseline) / baseline <= -self.settings.kill_switch_drawdown
 
     def _reentry_cooldown_active(self, session: Session, signal: TradeSignal) -> bool:
-        if self.settings.reentry_cooldown_minutes <= 0 or signal.side != SignalSide.BUY:
+        if self.settings.reentry_cooldown_minutes <= 0 or signal.side not in {SignalSide.LONG, SignalSide.SHORT}:
             return False
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.settings.reentry_cooldown_minutes)
-        recent_sell = (
+        recent_trade = (
             session.query(TradeSignal)
             .filter(
                 TradeSignal.symbol == signal.symbol,
-                TradeSignal.side == SignalSide.SELL,
+                TradeSignal.side.in_([SignalSide.LONG, SignalSide.SHORT]),
                 TradeSignal.created_at >= cutoff,
                 TradeSignal.status.notin_(["PENDING", "REJECTED"]),
             )
             .first()
         )
-        return recent_sell is not None
+        return recent_trade is not None
 
     def _position_side(self, signal_side: SignalSide) -> PositionSide:
-        if signal_side == SignalSide.SELL:
-            if self.settings.exchange == "binance_futures":
-                return PositionSide.SHORT
-            return PositionSide.SPOT
-        if self.settings.exchange == "binance_futures":
-            return PositionSide.LONG
-        return PositionSide.SPOT
+        if signal_side == SignalSide.SHORT:
+            return PositionSide.SHORT
+        return PositionSide.LONG

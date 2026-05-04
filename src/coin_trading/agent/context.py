@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
-from coin_trading.db.models import AppState, IndicatorSnapshot, MarketCandle, NewsItem, Position, PositionStatus
+from coin_trading.db.models import AppState, IndicatorSnapshot, MarketCandle, NewsItem, Position, PositionSide, PositionStatus
 from coin_trading.trade import PortfolioService
 
 
@@ -26,8 +26,9 @@ class LLMContextBuilder:
         symbol: str,
         timeframe: str,
         latest_price: float,
-        news_limit: int = 8,
-    ) -> dict:
+        news_limit: int | None = None,
+    ) -> dict[str, Any]:
+        news_limit = news_limit if news_limit is not None else self.settings.news_context_limit
         latest_candle = (
             session.query(MarketCandle)
             .filter_by(symbol=symbol, timeframe=timeframe)
@@ -79,7 +80,7 @@ class LLMContextBuilder:
         )
 
     @staticmethod
-    def _candle_payload(candle: MarketCandle) -> dict:
+    def _candle_payload(candle: MarketCandle) -> dict[str, Any]:
         return {
             "open_time": candle.open_time.isoformat(),
             "open": round(candle.open, 8),
@@ -105,7 +106,7 @@ class LLMContextBuilder:
         )
         return [self._candle_payload(candle) for candle in reversed(candles)]
 
-    def _multi_timeframe_indicators(self, session: Session, symbol: str) -> dict[str, dict]:
+    def _multi_timeframe_indicators(self, session: Session, symbol: str) -> dict[str, dict[str, Any]]:
         payload: dict[str, dict] = {}
         for timeframe in self.analysis_timeframes:
             indicators = self._latest_indicators(session, symbol, timeframe)
@@ -215,33 +216,27 @@ class LLMContextBuilder:
 
     @staticmethod
     def _position_instructions(snapshot: Any) -> str:
-        has_position = snapshot.base_asset_quantity > 0
-        if has_position:
+        open_positions = snapshot.open_positions
+        if not open_positions:
             return (
-                "CURRENT STATE: Open position. Pipeline re-evaluates every ~10 minutes; typical holding window is 2-8 hours. "
-                "Valid actions: SELL (exit) or HOLD (maintain). Never BUY on top of an existing position. "
-                "SELL when take_profit is hit, trend has flipped on the main timeframe, "
-                "stop_loss is approaching (within 0.3× ATR), OR the position has been open well past the holding window without progress. "
-                "HOLD when the entry thesis is still alive (trend intact, momentum positive, no immediate resistance) — "
-                "give the trade the 2-8h window to play out. Minor pullbacks inside the original stop are noise, not exit signals. "
-                "Return one JSON object with: action, confidence, entry_price, stop_loss, take_profit, "
-                "allocation_pct, leverage, time_horizon, rationale, risk_notes."
+                "CURRENT STATE: No open position. Cash available.\n"
+                "Valid actions:\n"
+                "  LONG  — enter long (expect price rise). Requires stop_loss < entry_price < take_profit.\n"
+                "  SHORT — enter short (expect price fall). Requires take_profit < entry_price < stop_loss.\n"
+                "  HOLD  — wait for better opportunity.\n"
+                "Never output LONG/SHORT without stop_loss, take_profit, entry_price, allocation_pct."
             )
         return (
-            "CURRENT STATE: No open position. Cash available. The pipeline may run every few minutes (~8–10m); "
-            "intraday holds are often 2–8h but the entry bar is relaxed for short cadence. "
-            "Valid actions: BUY (enter) or HOLD (wait). Never SELL with no position. "
-            "BUY when: (1) not a clear bear breakdown (bullish trend OR price near/above SMA_50 OR sideways without fresh breakdown) AND "
-            "(2) R/R ≥ 1.2:1 with a plausible stop, AND at least 1 of: RSI 25–80 / momentum not hostile, "
-            "volume_ratio ≥ 0.40 (only skip fresh entry if volume_ratio < 0.12), "
-            "Bull verdict WEAK+ unless Bear STRONG vs Bull WEAK. Use BUY confidence ≥ 0.50. "
-            "HOLD when clearly bearish+momentum down, unusable data, or R/R cannot reach 1.2:1. "
-            "On acceptable setups prefer modest BUY over endless HOLD. "
+            "CURRENT STATE: Open position(s) exist.\n"
+            "  SHORT signal — closes any open LONG and optionally opens SHORT.\n"
+            "  LONG signal  — closes any open SHORT and optionally opens LONG.\n"
+            "  HOLD — maintain current positions.\n"
+            "Never open same-side position on top of existing one without closing first.\n"
             "Return one JSON object with: action, confidence, entry_price, stop_loss, take_profit, "
             "allocation_pct, leverage, time_horizon, rationale, risk_notes."
         )
 
-    def _portfolio_payload(self, session: Session, symbol: str, latest_price: float, snapshot: Any = None) -> dict:
+    def _portfolio_payload(self, session: Session, symbol: str, latest_price: float, snapshot: Any = None) -> dict[str, Any]:
         from datetime import datetime, timezone
         if snapshot is None:
             snapshot = PortfolioService(self.settings, self.account_client).snapshot(
@@ -266,8 +261,12 @@ class LLMContextBuilder:
                 opened = opened.replace(tzinfo=timezone.utc)
             holding_minutes = int((now - opened).total_seconds() / 60)
             entry = round(pos.entry_price, 8)
-            unrealized_pnl_pct = round((latest_price - entry) / entry * 100, 4) if entry > 0 else 0
+            if pos.side == PositionSide.LONG:
+                unrealized_pnl_pct = round((latest_price - entry) / entry * 100, 4) if entry > 0 else 0
+            else:  # SHORT
+                unrealized_pnl_pct = round((entry - latest_price) / entry * 100, 4) if entry > 0 else 0
             position_details.append({
+                "side": pos.side.value,
                 "entry_price": entry,
                 "stop_loss": round(pos.stop_loss, 8) if pos.stop_loss is not None else None,
                 "take_profit": round(pos.take_profit, 8) if pos.take_profit is not None else None,

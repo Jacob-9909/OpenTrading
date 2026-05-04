@@ -18,6 +18,8 @@ class BithumbSpotClient:
         access_key: str | None = None,
         secret_key: str | None = None,
         base_url: str = "https://api.bithumb.com",
+        # Default matches Settings.exchange_timeout_seconds (10.0).
+        # Override by passing settings.exchange_timeout_seconds explicitly.
         timeout: float = 10.0,
     ) -> None:
         self.access_key = access_key

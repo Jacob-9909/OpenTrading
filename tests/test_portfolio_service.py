@@ -41,7 +41,7 @@ def test_paper_snapshot_includes_avg_entry_and_position_return() -> None:
     session.add(
         Position(
             symbol="KRW-BTC",
-            side=PositionSide.SPOT,
+            side=PositionSide.LONG,
             quantity=0.01,
             entry_price=90_000_000,
             mark_price=100_000_000,

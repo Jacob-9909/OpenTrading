@@ -1,9 +1,13 @@
+import logging
+
 from sqlalchemy.orm import Session
 
 from coin_trading.agent import create_trading_agent_graph
 from coin_trading.db.models import LLMDecision, SignalSide, TradeSignal
 from coin_trading.agent import TradingLLM
 from coin_trading.agent.context import LLMContextBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class StrategyService:
@@ -28,7 +32,7 @@ class StrategyService:
     ) -> TradeSignal:
         context = self.context_builder.build(session, symbol, timeframe, latest_price)
 
-        print(f"\n🤖 [Multi-Agent] Starting AI debate for {symbol}...")
+        logger.info("[Multi-Agent] Starting AI debate for %s...", symbol)
         agent_graph = create_trading_agent_graph()
         initial_state = {
             "context": context,
@@ -38,7 +42,7 @@ class StrategyService:
         }
         final_state = agent_graph.invoke(initial_state)
         llm_result = final_state["final_result"]
-        print("✅ [Multi-Agent] Debate concluded and Fund Manager made a decision.\n")
+        logger.info("[Multi-Agent] Debate concluded and Fund Manager made a decision.")
 
         llm_decision = LLMDecision(
             provider=llm_result.provider,

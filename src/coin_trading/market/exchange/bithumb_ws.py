@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import threading
 import time
 import uuid
@@ -8,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import websockets
+
+logger = logging.getLogger(__name__)
 
 _WS_URL = "wss://ws-api.bithumb.com/websocket/v1"
 _RECONNECT_DELAY = 5.0
@@ -58,13 +61,13 @@ class BithumbTickerMonitor:
         while not self._stop_event.is_set():
             try:
                 await self._connect_and_listen()
-            except Exception as exc:
-                print(f"[WS-ticker] {exc}. Reconnect in {_RECONNECT_DELAY}s...")
+            except (websockets.exceptions.WebSocketException, OSError, json.JSONDecodeError) as exc:
+                logger.warning("[WS-ticker] %s. Reconnect in %ss...", exc, _RECONNECT_DELAY)
                 await asyncio.sleep(_RECONNECT_DELAY)
 
     async def _connect_and_listen(self) -> None:
         async with websockets.connect(_WS_URL, ping_interval=30, ping_timeout=10) as ws:
-            print(f"[WS-ticker] Connected → subscribed to {self.symbol} ticker.")
+            logger.info("[WS-ticker] Connected -> subscribed to %s ticker.", self.symbol)
             await ws.send(json.dumps([
                 {"ticket": str(uuid.uuid4())},
                 {"type": "ticker", "codes": [self.symbol]},
@@ -148,13 +151,13 @@ class BithumbCandleStreamer:
         while not self._stop_event.is_set():
             try:
                 await self._connect_and_listen()
-            except Exception as exc:
-                print(f"[WS-candle] {exc}. Reconnect in {_RECONNECT_DELAY}s...")
+            except (websockets.exceptions.WebSocketException, OSError, json.JSONDecodeError) as exc:
+                logger.warning("[WS-candle] %s. Reconnect in %ss...", exc, _RECONNECT_DELAY)
                 await asyncio.sleep(_RECONNECT_DELAY)
 
     async def _connect_and_listen(self) -> None:
         async with websockets.connect(_WS_URL, ping_interval=30, ping_timeout=10) as ws:
-            print(f"[WS-candle] Connected → subscribed to {self.symbol} trade.")
+            logger.info("[WS-candle] Connected -> subscribed to %s trade.", self.symbol)
             await ws.send(json.dumps([
                 {"ticket": str(uuid.uuid4())},
                 {"type": "trade", "codes": [self.symbol], "is_only_realtime": True},
@@ -219,7 +222,7 @@ class BithumbCandleStreamer:
                 session, self.symbol, timeframe, self._lookback_limit
             )
         except Exception as exc:
-            print(f"[WS-candle] flush {timeframe} ERROR: {exc}")
+            logger.error("[WS-candle] flush %s ERROR: %s", timeframe, exc)
             session.rollback()
         finally:
             session.close()
