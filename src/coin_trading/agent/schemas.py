@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class TradingDecision(BaseModel):
-    action: Literal["LONG", "SHORT", "HOLD"]
+    action: Literal["LONG", "SHORT", "CLOSE_POSITION", "HOLD"]
+    position_id: int | None = Field(default=None, description="Required when action is CLOSE_POSITION")
     confidence: float = Field(ge=0, le=1)
     entry_price: float | None = Field(default=None, gt=0)
     stop_loss: float | None = Field(default=None, gt=0)
@@ -19,6 +20,11 @@ class TradingDecision(BaseModel):
     def validate_trade_prices(self) -> "TradingDecision":
         if self.action == "HOLD":
             return self
+        if self.action == "CLOSE_POSITION":
+            if self.position_id is None:
+                raise ValueError("CLOSE_POSITION requires position_id")
+            return self
+            
         missing = [
             name
             for name, value in [

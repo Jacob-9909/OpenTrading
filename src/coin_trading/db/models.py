@@ -17,6 +17,7 @@ def utc_now() -> datetime:
 class SignalSide(StrEnum):
     LONG = "LONG"
     SHORT = "SHORT"
+    CLOSE_POSITION = "CLOSE_POSITION"
     HOLD = "HOLD"
 
 
@@ -119,6 +120,7 @@ class TradeSignal(Base):
     stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
     leverage: Mapped[int] = mapped_column(Integer, default=1)
+    close_position_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rationale: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="PENDING")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

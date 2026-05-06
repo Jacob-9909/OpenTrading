@@ -37,6 +37,16 @@ class RiskEngine:
             session.commit()
             return RiskApproval(False, "LLM returned HOLD.")
 
+        if signal.side == SignalSide.CLOSE_POSITION:
+            if not signal.close_position_id:
+                return RiskApproval(False, "CLOSE_POSITION requires close_position_id.")
+            position = session.get(Position, signal.close_position_id)
+            if not position or position.status != PositionStatus.OPEN:
+                return RiskApproval(False, f"Position {signal.close_position_id} not found or already closed.")
+            signal.status = "APPROVED"
+            session.commit()
+            return RiskApproval(True, "Approved close position.", quantity=position.quantity)
+
         rejection = self._preflight_rejection(session, signal, mark_price)
         if rejection:
             self._record_rejection(session, signal, rejection)
@@ -144,9 +154,9 @@ class RiskEngine:
             return f"Leverage {signal.leverage} exceeds max {self.settings.max_leverage}."
         if signal.side in {SignalSide.LONG, SignalSide.SHORT} and self._kill_switch_active(session, signal.symbol, mark_price):
             return f"Kill switch: portfolio drawdown exceeds {self.settings.kill_switch_drawdown:.0%}."
-        if self._reentry_cooldown_active(session, signal):
+        if signal.side in {SignalSide.LONG, SignalSide.SHORT} and self._reentry_cooldown_active(session, signal):
             return f"Re-entry cooldown: {self.settings.reentry_cooldown_minutes}m after last trade."
-        if signal.confidence < 0.50:
+        if signal.side in {SignalSide.LONG, SignalSide.SHORT} and signal.confidence < 0.50:
             return "Signal confidence is below minimum threshold (0.50)."
         return None
 

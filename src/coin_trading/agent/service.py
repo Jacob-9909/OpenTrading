@@ -65,6 +65,7 @@ class StrategyService:
             stop_loss=decision.stop_loss,
             take_profit=decision.take_profit,
             leverage=decision.leverage,
+            close_position_id=getattr(decision, "position_id", None),
             rationale=decision.rationale,
         )
         session.add(signal)

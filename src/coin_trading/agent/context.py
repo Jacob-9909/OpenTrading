@@ -227,12 +227,12 @@ class LLMContextBuilder:
                 "Never output LONG/SHORT without stop_loss, take_profit, entry_price, allocation_pct."
             )
         return (
-            "CURRENT STATE: Open position(s) exist.\n"
-            "  SHORT signal — closes any open LONG and optionally opens SHORT.\n"
-            "  LONG signal  — closes any open SHORT and optionally opens LONG.\n"
-            "  HOLD — maintain current positions.\n"
-            "Never open same-side position on top of existing one without closing first.\n"
-            "Return one JSON object with: action, confidence, entry_price, stop_loss, take_profit, "
+            "CURRENT STATE: Open position(s) exist. You can hold multiple positions concurrently.\n"
+            "  CLOSE_POSITION signal — closes a specific position. MUST provide 'position_id'.\n"
+            "  LONG signal  — opens a NEW long position independently.\n"
+            "  SHORT signal — opens a NEW short position independently.\n"
+            "  HOLD — maintain current positions without opening or closing any.\n"
+            "Return one JSON object with: action, position_id, confidence, entry_price, stop_loss, take_profit, "
             "allocation_pct, leverage, time_horizon, rationale, risk_notes."
         )
 
@@ -266,6 +266,7 @@ class LLMContextBuilder:
             else:  # SHORT
                 unrealized_pnl_pct = round((entry - latest_price) / entry * 100, 4) if entry > 0 else 0
             position_details.append({
+                "position_id": pos.id,
                 "side": pos.side.value,
                 "entry_price": entry,
                 "stop_loss": round(pos.stop_loss, 8) if pos.stop_loss is not None else None,
