@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -35,20 +36,27 @@ class TradeContext:
 
 
 class GeminiSummarizer:
-    def __init__(self, project_id: str, model_id: str, location: str = "us-central1") -> None:
-        from google import genai
+    def __init__(
+        self,
+        project_id: str,
+        model_id: str,
+        location: str = "us-central1",
+        credentials_path: str | None = None,
+    ) -> None:
+        if credentials_path:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
 
-        self.client = genai.Client(vertexai=True, project=project_id, location=location)
-        self.model_id = model_id
+        import vertexai
+        from vertexai.generative_models import GenerativeModel
+
+        vertexai.init(project=project_id, location=location)
+        self._model = GenerativeModel(model_id)
 
     def summarize(self, ctx: TradeContext) -> str:
         info = self._format_context(ctx)
         prompt = _SUMMARY_PROMPT.format(info=info)
         try:
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=prompt,
-            )
+            response = self._model.generate_content(prompt)
             return (response.text or "").strip()
         except Exception as exc:
             logger.warning("[gemini-summarizer] 요약 생성 실패: %s", exc)

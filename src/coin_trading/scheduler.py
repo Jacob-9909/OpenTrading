@@ -24,7 +24,7 @@ from coin_trading.market import NewsCollector
 from coin_trading.trade import RiskEngine
 from coin_trading.agent.context import LLMContextBuilder
 from coin_trading.agent.service import StrategyService
-from coin_trading.notifications import SlackNotifier, GeminiSummarizer
+from coin_trading.notifications import TelegramNotifier, GeminiSummarizer
 from coin_trading.notifications.gemini_summarizer import TradeContext
 from coin_trading.trade.portfolio import PortfolioService
 
@@ -70,12 +70,17 @@ class TradingPipeline:
                 settings, settings.researcher_llm_provider, settings.researcher_llm_model
             ),
         )
-        self._slack = SlackNotifier(settings.slack_webhook_url) if settings.slack_webhook_url else None
+        self._telegram = (
+            TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
+            if settings.telegram_bot_token and settings.telegram_chat_id
+            else None
+        )
         self._gemini = (
             GeminiSummarizer(
                 project_id=settings.vertex_project_id,
                 model_id=settings.vertex_model_id,
                 location=settings.vertex_location,
+                credentials_path=settings.google_application_credentials,
             )
             if settings.vertex_project_id
             else None
@@ -272,7 +277,7 @@ class TradingPipeline:
         signal: TradeSignal,
         mark_price: float,
     ) -> None:
-        if not self._slack:
+        if not self._telegram:
             return
         try:
             snapshot = PortfolioService(self.settings, self.account_client).snapshot(
@@ -299,7 +304,7 @@ class TradingPipeline:
             else:
                 from coin_trading.notifications.gemini_summarizer import GeminiSummarizer as _GS
                 message = _GS._fallback_summary(ctx)
-            self._slack.send(message)
+            self._telegram.send(message)
         except Exception as exc:
             logger.warning("[notify] 알림 전송 실패: %s", exc)
 
