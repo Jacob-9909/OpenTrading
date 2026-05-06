@@ -81,7 +81,14 @@ class Settings(BaseSettings):
     max_data_staleness_minutes: int = Field(default=30, ge=1)
     reentry_cooldown_minutes: int = Field(default=0, ge=0)
     trailing_stop_pct: float | None = Field(default=None, gt=0, le=0.5)
+    trailing_tp_pct: float | None = Field(default=None, gt=0, le=0.5)
     price_consistency_threshold_pct: float = Field(default=0.5, ge=0.0)
+
+    # Slack / Gemini Vertex AI 알림
+    slack_webhook_url: str | None = None
+    vertex_project_id: str | None = None
+    vertex_model_id: str = "gemini-2.5-flash"
+    vertex_location: str = "us-central1"
 
     @field_validator("news_rss_urls", "analysis_timeframes", mode="before")
     @classmethod

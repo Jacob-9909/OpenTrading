@@ -1,5 +1,5 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -10,7 +10,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
-from coin_trading.db.models import MarketCandle, Position, PositionStatus, RiskEventType, TradeSignal
+from coin_trading.db.models import MarketCandle, Position, PositionStatus, RiskEventType, TradeSignal, SignalSide
 from coin_trading.market.exchange.bithumb_ws import BithumbCandleStreamer, BithumbTickerMonitor
 from coin_trading.trade.execution.live_bithumb import BithumbLiveExecutor
 from coin_trading.db.session import SessionLocal
@@ -24,6 +24,9 @@ from coin_trading.market import NewsCollector
 from coin_trading.trade import RiskEngine
 from coin_trading.agent.context import LLMContextBuilder
 from coin_trading.agent.service import StrategyService
+from coin_trading.notifications import SlackNotifier, GeminiSummarizer
+from coin_trading.notifications.gemini_summarizer import TradeContext
+from coin_trading.trade.portfolio import PortfolioService
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,16 @@ class TradingPipeline:
                 settings, settings.researcher_llm_provider, settings.researcher_llm_model
             ),
         )
+        self._slack = SlackNotifier(settings.slack_webhook_url) if settings.slack_webhook_url else None
+        self._gemini = (
+            GeminiSummarizer(
+                project_id=settings.vertex_project_id,
+                model_id=settings.vertex_model_id,
+                location=settings.vertex_location,
+            )
+            if settings.vertex_project_id
+            else None
+        )
 
     def refresh_data_once(self, session: Session | None = None) -> DataRefreshResult:
         collection_requests = self._collection_requests()
@@ -100,6 +113,12 @@ class TradingPipeline:
                     timeframe=timeframe,
                     limit=self.settings.lookback_limit,
                 )
+            self.risk.update_sltp_from_candle(
+                session,
+                symbol=self.settings.symbol,
+                timeframe=self.settings.timeframe,
+                mark_price=latest_price,
+            )
             return DataRefreshResult(
                 latest_price=latest_price,
                 refreshed_timeframes=list(collection_requests),
@@ -185,6 +204,8 @@ class TradingPipeline:
             order = None
             if self.settings.trading_mode != "signal_only":
                 order = self.executor.execute(session, signal, approval, latest_price)
+            if signal.side in {SignalSide.LONG, SignalSide.SHORT}:
+                self._send_trade_notification(session, signal, latest_price)
             return PipelineResult(
                 latest_price=latest_price,
                 signal_id=signal.id,
@@ -244,6 +265,43 @@ class TradingPipeline:
             logger.info("[serve-all] Stopping...")
             monitor.stop()
             streamer.stop()
+
+    def _send_trade_notification(
+        self,
+        session: Session,
+        signal: TradeSignal,
+        mark_price: float,
+    ) -> None:
+        if not self._slack:
+            return
+        try:
+            snapshot = PortfolioService(self.settings, self.account_client).snapshot(
+                session,
+                symbol=self.settings.symbol,
+                mark_price=mark_price,
+            )
+            ctx = TradeContext(
+                symbol=signal.symbol,
+                side=signal.side.value,
+                entry_price=signal.entry_price or mark_price,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                confidence=signal.confidence,
+                rationale=signal.rationale,
+                mark_price=mark_price,
+                realized_pnl=snapshot.realized_pnl,
+                unrealized_pnl=snapshot.unrealized_pnl,
+                equity=snapshot.equity,
+                open_positions=snapshot.open_positions,
+            )
+            if self._gemini:
+                message = self._gemini.summarize(ctx)
+            else:
+                from coin_trading.notifications.gemini_summarizer import GeminiSummarizer as _GS
+                message = _GS._fallback_summary(ctx)
+            self._slack.send(message)
+        except Exception as exc:
+            logger.warning("[notify] 알림 전송 실패: %s", exc)
 
     def _on_monitor_price(self, price: float) -> None:
         try:

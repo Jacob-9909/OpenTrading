@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from coin_trading.config import Settings
 from coin_trading.db.models import (
     AppState,
+    IndicatorSnapshot,
     Position,
     PositionSide,
     PositionStatus,
@@ -112,9 +113,16 @@ class RiskEngine:
                     new_stop = round(mark_price * (1 + self.settings.trailing_stop_pct), 8)
                     if position.stop_loss is None or new_stop < position.stop_loss:
                         position.stop_loss = new_stop
+            if self.settings.trailing_tp_pct:
+                self._apply_trailing_tp(session, position, mark_price)
+            tp_hit = (
+                self._check_tp_comeback(session, position, mark_price)
+                if self.settings.trailing_tp_pct
+                else self._hit_take_profit(position, mark_price)
+            )
             if self._hit_stop_loss(position, mark_price):
                 events.append(self._event(symbol, RiskEventType.STOP_LOSS, "Stop loss reached.", position))
-            elif self._hit_take_profit(position, mark_price):
+            elif tp_hit:
                 events.append(
                     self._event(symbol, RiskEventType.TAKE_PROFIT, "Take profit reached.", position)
                 )
@@ -132,6 +140,134 @@ class RiskEngine:
         session.add_all(events)
         session.commit()
         return events
+
+    def _apply_trailing_tp(self, session: Session, position: Position, mark_price: float) -> None:
+        """TP 돌파 시 연장 + comeback trigger 저장. peak 추적으로 TP를 점진적으로 당김.
+
+        동작:
+        - 가격이 TP 돌파 → 기존 TP를 trigger로 저장, TP를 X% 더 연장
+        - 계속 돌파 시 trigger 갱신 반복
+        - comeback은 _check_tp_comeback에서 판정
+        """
+        pct = self.settings.trailing_tp_pct
+        if not pct:
+            return
+        peak_key = f"peak_price:{position.id}"
+        trigger_key = f"tp_trigger:{position.id}"
+        stored_peak = AppState.get(session, peak_key)
+        peak = float(stored_peak) if stored_peak else position.entry_price
+
+        if position.side == PositionSide.LONG:
+            if mark_price > peak:
+                AppState.set(session, peak_key, str(mark_price))
+                peak = mark_price
+            if position.take_profit and mark_price >= position.take_profit:
+                # TP 돌파 → trigger 저장 후 TP 연장
+                AppState.set(session, trigger_key, str(position.take_profit))
+                position.take_profit = round(mark_price * (1 + pct), 8)
+            else:
+                # 일반 trailing: peak 기준으로 TP 상향
+                new_tp = round(peak * (1 - pct), 8)
+                if position.take_profit is None or new_tp > position.take_profit:
+                    position.take_profit = new_tp
+
+        elif position.side == PositionSide.SHORT:
+            if mark_price < peak:
+                AppState.set(session, peak_key, str(mark_price))
+                peak = mark_price
+            if position.take_profit and mark_price <= position.take_profit:
+                # TP 돌파 → trigger 저장 후 TP 연장
+                AppState.set(session, trigger_key, str(position.take_profit))
+                position.take_profit = round(mark_price * (1 - pct), 8)
+            else:
+                # 일반 trailing: peak(trough) 기준으로 TP 하향
+                new_tp = round(peak * (1 + pct), 8)
+                if position.take_profit is None or new_tp < position.take_profit:
+                    position.take_profit = new_tp
+
+    def _check_tp_comeback(self, session: Session, position: Position, mark_price: float) -> bool:
+        """가격이 trigger(마지막 돌파 시점 TP)로 복귀하면 True → 청산."""
+        trigger_key = f"tp_trigger:{position.id}"
+        stored = AppState.get(session, trigger_key)
+        if not stored:
+            return False
+        trigger = float(stored)
+        if position.side == PositionSide.LONG:
+            return mark_price <= trigger
+        return mark_price >= trigger
+
+    def update_sltp_from_candle(
+        self,
+        session: Session,
+        symbol: str,
+        timeframe: str,
+        mark_price: float,
+    ) -> None:
+        """최신 캔들 지표(ATR) 기반으로 오픈 포지션의 SL/TP를 동적 조정.
+
+        TP에 가까워질수록 SL을 조여 이익 보호. ATR 변화에 따라 SL/TP 거리 재조정.
+        """
+        snapshot = (
+            session.query(IndicatorSnapshot)
+            .filter_by(symbol=symbol, timeframe=timeframe)
+            .order_by(IndicatorSnapshot.calculated_at.desc())
+            .first()
+        )
+        if not snapshot:
+            return
+        atr = float(snapshot.values.get("atr_14") or 0)
+        if atr <= 0:
+            return
+
+        positions = (
+            session.query(Position)
+            .filter_by(symbol=symbol, status=PositionStatus.OPEN)
+            .all()
+        )
+        for position in positions:
+            self._adjust_sl_as_tp_approaches(position, mark_price, atr)
+        session.commit()
+
+    def _adjust_sl_as_tp_approaches(
+        self,
+        position: Position,
+        mark_price: float,
+        atr: float,
+    ) -> None:
+        """TP까지 남은 거리에 따라 SL을 단계적으로 조임.
+
+        TP까지 거리가 1.5 ATR 미만이면 SL을 entry 쪽으로 0.5 ATR씩 당김.
+        """
+        if position.take_profit is None or position.stop_loss is None:
+            return
+
+        if position.side == PositionSide.LONG:
+            remaining = position.take_profit - mark_price
+            if remaining <= 0:
+                return
+            if remaining < atr * 1.5:
+                # TP 근접 → SL 상향 (이익 보호)
+                tightened = round(mark_price - atr * 0.5, 8)
+                if tightened > position.stop_loss:
+                    position.stop_loss = tightened
+            elif remaining < atr * 3.0:
+                # 중간 거리 → SL 소폭 상향
+                tightened = round(position.entry_price + atr * 0.3, 8)
+                if tightened > position.stop_loss:
+                    position.stop_loss = tightened
+
+        elif position.side == PositionSide.SHORT:
+            remaining = mark_price - position.take_profit
+            if remaining <= 0:
+                return
+            if remaining < atr * 1.5:
+                tightened = round(mark_price + atr * 0.5, 8)
+                if tightened < position.stop_loss:
+                    position.stop_loss = tightened
+            elif remaining < atr * 3.0:
+                tightened = round(position.entry_price - atr * 0.3, 8)
+                if tightened < position.stop_loss:
+                    position.stop_loss = tightened
 
     def estimate_liquidation_price(
         self,
