@@ -243,6 +243,25 @@ GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account.json
 
 ---
 
+## 운영 (macOS launchd)
+
+`scripts/bot.sh` 한 번에 launchd 등록·시작·정지·로그 확인.
+
+```bash
+./scripts/bot.sh start    # 봇 시작 + 부팅 시 자동 시작 + 죽으면 자동 재시작
+./scripts/bot.sh stop     # 정지 + 등록 해제
+./scripts/bot.sh restart  # 재시작
+./scripts/bot.sh status   # 실행 상태 + PID + 메모리/CPU
+./scripts/bot.sh logs     # 실시간 트레이딩 로그
+./scripts/bot.sh errors   # 에러 로그 (마지막 50줄)
+```
+
+- 로그: `logs/trading.log` (매일 자정 자동 분할, 7일치 보관)
+- launchd 출력: `logs/launchd.out`, `logs/launchd.err`
+- Sleep 방지: Amphetamine 등 별도 앱 사용 권장
+
+---
+
 ## 디렉토리 구조
 
 ```

@@ -1,4 +1,6 @@
 import logging
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 
 import typer
 
@@ -68,8 +70,18 @@ def serve_all() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    formatter = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+    file_handler = TimedRotatingFileHandler(
+        log_dir / "trading.log",
+        when="midnight",
+        interval=1,
+        backupCount=7,
+        encoding="utf-8",
     )
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logging.basicConfig(level=logging.INFO, handlers=[stream_handler, file_handler])
     cli()

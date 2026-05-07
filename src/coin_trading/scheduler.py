@@ -275,9 +275,17 @@ class TradingPipeline:
             hour="8,15,21",
             minute=0,
         )
+        import signal
+        def _shutdown(signum, _frame):
+            logger.info("[serve-all] received signal %s, stopping...", signum)
+            scheduler.shutdown(wait=False)
+            monitor.stop()
+            streamer.stop()
+        signal.signal(signal.SIGTERM, _shutdown)
+        signal.signal(signal.SIGINT, _shutdown)
         try:
             scheduler.start()
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, SystemExit):
             logger.info("[serve-all] Stopping...")
             monitor.stop()
             streamer.stop()
