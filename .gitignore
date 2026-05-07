@@ -50,3 +50,12 @@ logs/
 # (migrations folder is tracked, but not generated files if any)
 # Added by code-review-graph
 .code-review-graph/
+
+# Claude Code worktrees
+.claude/worktrees/
+
+# Trading logs
+trading_log.csv
+
+# credentials
+*.json

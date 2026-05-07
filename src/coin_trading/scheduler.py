@@ -24,7 +24,7 @@ from coin_trading.market import NewsCollector
 from coin_trading.trade import RiskEngine
 from coin_trading.agent.context import LLMContextBuilder
 from coin_trading.agent.service import StrategyService
-from coin_trading.notifications import TelegramNotifier, GeminiSummarizer
+from coin_trading.notifications import SlackNotifier, GeminiSummarizer
 from coin_trading.notifications.gemini_summarizer import TradeContext
 from coin_trading.trade.portfolio import PortfolioService
 
@@ -70,11 +70,12 @@ class TradingPipeline:
                 settings, settings.researcher_llm_provider, settings.researcher_llm_model
             ),
         )
-        self._telegram = (
-            TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
-            if settings.telegram_bot_token and settings.telegram_chat_id
+        self._slack = (
+            SlackNotifier(settings.slack_webhook_url)
+            if settings.slack_webhook_url
             else None
         )
+        self._notifiers = [n for n in (self._slack,) if n]
         self._gemini = (
             GeminiSummarizer(
                 project_id=settings.vertex_project_id,
@@ -85,6 +86,10 @@ class TradingPipeline:
             if settings.vertex_project_id
             else None
         )
+
+    def _notify(self, message: str) -> None:
+        for n in self._notifiers:
+            n.send(message)
 
     def refresh_data_once(self, session: Session | None = None) -> DataRefreshResult:
         collection_requests = self._collection_requests()
@@ -264,6 +269,12 @@ class TradingPipeline:
             minutes=self.settings.run_once_interval_minutes,
             next_run_time=datetime.now(ZoneInfo(self.settings.scheduler_timezone)),
         )
+        scheduler.add_job(
+            self._send_health_check,
+            "cron",
+            hour="8,15,21",
+            minute=0,
+        )
         try:
             scheduler.start()
         except KeyboardInterrupt:
@@ -277,7 +288,7 @@ class TradingPipeline:
         signal: TradeSignal,
         mark_price: float,
     ) -> None:
-        if not self._telegram:
+        if not self._notifiers:
             return
         try:
             snapshot = PortfolioService(self.settings, self.account_client).snapshot(
@@ -304,7 +315,7 @@ class TradingPipeline:
             else:
                 from coin_trading.notifications.gemini_summarizer import GeminiSummarizer as _GS
                 message = _GS._fallback_summary(ctx)
-            self._telegram.send(message)
+            self._notify(message)
         except Exception as exc:
             logger.warning("[notify] 알림 전송 실패: %s", exc)
 
@@ -331,7 +342,7 @@ class TradingPipeline:
                 self._send_exit_notification(position, event.event_type, mark_price)
 
     def _send_exit_notification(self, position: Position, event_type: RiskEventType, mark_price: float) -> None:
-        if not self._telegram:
+        if not self._notifiers:
             return
         try:
             pnl = (
@@ -346,9 +357,18 @@ class TradingPipeline:
                 f"진입가: {position.entry_price:,.0f} | 체결가: {mark_price:,.0f}\n"
                 f"실현 PnL: {pnl:+,.0f} KRW"
             )
-            self._telegram.send(message)
+            self._notify(message)
         except Exception as exc:
             logger.warning("[notify] 청산 알림 전송 실패: %s", exc)
+
+    def _send_health_check(self) -> None:
+        if not self._notifiers:
+            return
+        try:
+            now = datetime.now(ZoneInfo(self.settings.scheduler_timezone)).strftime("%Y-%m-%d %H:%M")
+            self._notify(f"[{now}] 봇 정상 작동 중")
+        except Exception as exc:
+            logger.warning("[notify] 헬스체크 전송 실패: %s", exc)
 
     def _collection_timeframes(self) -> list[str]:
         timeframes = [self.settings.timeframe, *self.settings.analysis_timeframes, "1d"]

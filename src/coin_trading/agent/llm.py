@@ -26,7 +26,7 @@ Entry conditions (apply to both LONG and SHORT):
 1) Clear directional signal: trend aligned OR strong debate verdict (Bull STRONG for LONG, Bear STRONG for SHORT).
 2) Risk/reward ≥ 2:1. stop_loss MUST be ≥ 1.5× ATR away from entry; take_profit MUST be ≥ 3.0× ATR away from entry. Minimum absolute distance: SL ≥ 0.3% of entry, TP ≥ 0.6% of entry.
 3) At least 1 soft signal:
-   • Momentum: RSI 25–80 for LONG / RSI > 20 for SHORT; MACD direction aligned.
+   • Momentum: RSI 30–65 for LONG / RSI 35–70 for SHORT; MACD direction aligned. Avoid LONG when RSI > 70 (overbought, reversal risk) and avoid SHORT when RSI < 30 (oversold, bounce risk).
    • Volume: volume_ratio ≥ 0.40 (< 0.12 = hard red flag).
    • Debate: Bull/Bear verdict WEAK+ on the relevant side.
 
@@ -317,7 +317,7 @@ class MockTradingLLM(TradingLLM):
         portfolio = context.get("portfolio") or {}
         max_allocation_pct = float(portfolio.get("max_position_allocation_pct") or 30)
 
-        if trend == "bullish" and rsi < 70:
+        if trend == "bullish" and 30 <= rsi <= 65:
             decision = TradingDecision(
                 action="LONG",
                 confidence=0.62,
@@ -329,7 +329,7 @@ class MockTradingLLM(TradingLLM):
                 rationale="Mock rule: bullish trend with RSI below overbought zone.",
                 risk_notes=["Paper trading decision. Validate with live liquidity before production."],
             )
-        elif trend == "bearish" and rsi > 30:
+        elif trend == "bearish" and 35 <= rsi <= 70:
             decision = TradingDecision(
                 action="SHORT",
                 confidence=0.58,
@@ -586,14 +586,6 @@ def create_llm(settings: Settings) -> TradingLLM:
         if not settings.gemini_api_key:
             raise ValueError("GEMINI_API_KEY is required when LLM_PROVIDER=gemini.")
         return GeminiTradingLLM(api_key=settings.gemini_api_key, model=settings.llm_model)
-    if settings.llm_provider == "openrouter":
-        if not settings.openrouter_api_key:
-            raise ValueError("OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter.")
-        return OpenRouterTradingLLM(
-            api_key=settings.openrouter_api_key,
-            model=settings.llm_model,
-            base_url=settings.openrouter_base_url,
-        )
     if settings.llm_provider == "nvidia":
         if not settings.nvidia_api_key:
             raise ValueError("NVIDIA_API_KEY is required when LLM_PROVIDER=nvidia.")

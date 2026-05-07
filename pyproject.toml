@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "apscheduler",
     "feedparser",
-    "google-cloud-aiplatform[vertexai]",
+    "google-genai",
     "httpx",
     "litellm",
     "numpy",

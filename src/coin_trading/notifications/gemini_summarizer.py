@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 _SUMMARY_PROMPT = """당신은 암호화폐 트레이딩 봇의 상태를 팀에 간결하게 알려주는 어시스턴트입니다.
-아래 트레이딩 정보를 바탕으로 Slack에 보낼 요약 메시지를 한국어로 작성하세요.
+아래 트레이딩 정보를 바탕으로 텔레그램에 보낼 요약 메시지를 한국어로 작성하세요.
 
 형식 규칙:
 - 이모지를 활용하지말고 줄바꿈을 활용해 가독성을 높이세요
@@ -46,17 +46,16 @@ class GeminiSummarizer:
         if credentials_path:
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
 
-        import vertexai
-        from vertexai.generative_models import GenerativeModel
+        from google import genai
 
-        vertexai.init(project=project_id, location=location)
-        self._model = GenerativeModel(model_id)
+        self._client = genai.Client(vertexai=True, project=project_id, location=location)
+        self._model_id = model_id
 
     def summarize(self, ctx: TradeContext) -> str:
         info = self._format_context(ctx)
         prompt = _SUMMARY_PROMPT.format(info=info)
         try:
-            response = self._model.generate_content(prompt)
+            response = self._client.models.generate_content(model=self._model_id, contents=prompt)
             return (response.text or "").strip()
         except Exception as exc:
             logger.warning("[gemini-summarizer] 요약 생성 실패: %s", exc)

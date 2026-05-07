@@ -84,9 +84,8 @@ class Settings(BaseSettings):
     trailing_tp_pct: float | None = Field(default=None, gt=0, le=0.5)
     price_consistency_threshold_pct: float = Field(default=0.5, ge=0.0)
 
-    # Telegram / Gemini Vertex AI 알림
-    telegram_bot_token: str | None = None
-    telegram_chat_id: str | None = None
+    # Slack / Gemini Vertex AI 알림
+    slack_webhook_url: str | None = None
     vertex_project_id: str | None = None
     vertex_model_id: str = "gemini-2.5-flash"
     vertex_location: str = "us-central1"
