@@ -69,12 +69,18 @@ class Settings(BaseSettings):
     # HTTP
     exchange_timeout_seconds: float = Field(default=10.0, gt=0)
 
+    news_source: Literal["coindesk", "rss"] = "coindesk"
     news_rss_urls: list[str] = Field(
         default_factory=lambda: [
             "https://www.coindesk.com/arc/outboundfeeds/rss/",
             "https://cointelegraph.com/rss",
         ]
     )
+    coindesk_api_key: str | None = None
+    coindesk_lang: str = "EN"
+    coindesk_categories: list[str] = Field(default_factory=list)
+    coindesk_exclude_categories: list[str] = Field(default_factory=list)
+    coindesk_fetch_limit: int = Field(default=50, ge=1, le=200)
     run_once_interval_minutes: int = Field(default=360, ge=1)
     scheduler_timezone: str = "Asia/Seoul"
     decision_cooldown_minutes: int = Field(default=0, ge=0)
@@ -91,7 +97,13 @@ class Settings(BaseSettings):
     vertex_location: str = "us-central1"
     google_application_credentials: str | None = None
 
-    @field_validator("news_rss_urls", "analysis_timeframes", mode="before")
+    @field_validator(
+        "news_rss_urls",
+        "analysis_timeframes",
+        "coindesk_categories",
+        "coindesk_exclude_categories",
+        mode="before",
+    )
     @classmethod
     def split_csv_values(cls, value: object) -> list[str]:
         if isinstance(value, str):

@@ -61,8 +61,11 @@ class LLMContextBuilder:
             "news": [
                 {
                     "title": item.title,
+                    "subtitle": item.summary or None,
                     "source": item.source,
-                    "sentiment_score": item.sentiment_score,
+                    "categories": item.categories or [],
+                    "sentiment": item.sentiment,
+                    "score": item.score,
                     "published_at": item.published_at.isoformat() if item.published_at else None,
                 }
                 for item in news

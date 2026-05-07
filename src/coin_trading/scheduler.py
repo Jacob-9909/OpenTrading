@@ -20,7 +20,7 @@ from coin_trading.market import IndicatorCalculator
 from coin_trading.market.indicators import timeframe_minutes
 from coin_trading.agent import create_agent_llm, create_llm
 from coin_trading.market import MarketDataCollector
-from coin_trading.market import NewsCollector
+from coin_trading.market import create_news_collector
 from coin_trading.trade import RiskEngine
 from coin_trading.agent.context import LLMContextBuilder
 from coin_trading.agent.service import StrategyService
@@ -52,7 +52,7 @@ class TradingPipeline:
         self.account_client = client
         self.market_data = MarketDataCollector(client, settings)
         self.indicators = IndicatorCalculator()
-        self.news = NewsCollector(settings.news_rss_urls)
+        self.news = create_news_collector(settings)
         self.risk = RiskEngine(settings, account_client=self.account_client)
         self.executor = create_executor(settings, client)
         self.strategy = StrategyService(

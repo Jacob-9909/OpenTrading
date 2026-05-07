@@ -188,6 +188,40 @@ WebSocket TickerMonitor가 실시간으로 가격을 수신하여, SL/TP 도달 
 
 ---
 
+## 뉴스 수집
+
+CoinDesk Data API (기본값) 또는 RSS 피드에서 뉴스 적재 → Sentiment Analyst가 판단 시 활용.
+
+### CoinDesk (기본)
+
+`https://data-api.coindesk.com/news/v1/article/list` 호출. CoinDesk가 GPT로 사전 분류한 `SENTIMENT` 라벨(`POSITIVE` / `NEUTRAL` / `NEGATIVE`) 그대로 LLM에 전달.
+
+| 필드 | 출처 |
+|---|---|
+| `title` | TITLE |
+| `subtitle` | SUBTITLE (BODY는 노이즈로 제외) |
+| `source` | SOURCE_DATA.NAME (CoinDesk, Bitcoin.com 등) |
+| `categories` | CATEGORY_DATA.CATEGORY (BTC, MARKET, EXCHANGE 등) |
+| `sentiment` | SENTIMENT 라벨 |
+| `score` | UPVOTES − DOWNVOTES |
+| `published_at` | PUBLISHED_ON (UTC) |
+
+### Incremental Fetch
+
+매 사이클마다 동일 50건을 다시 처리하지 않도록 `AppState.coindesk_last_published_ts`에 high watermark 저장. `PUBLISHED_ON > last_ts`만 INSERT.
+
+### 환경변수
+
+```env
+NEWS_SOURCE=coindesk         # coindesk | rss
+COINDESK_API_KEY=...
+COINDESK_LANG=EN
+COINDESK_CATEGORIES=BTC      # 빈 값이면 전체
+COINDESK_FETCH_LIMIT=50
+```
+
+---
+
 ## 알림 시스템
 
 Slack Incoming Webhook으로 모든 알림 발송.
@@ -248,12 +282,15 @@ GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account.json
 `scripts/bot.sh` 한 번에 launchd 등록·시작·정지·로그 확인.
 
 ```bash
-./scripts/bot.sh start    # 봇 시작 + 부팅 시 자동 시작 + 죽으면 자동 재시작
-./scripts/bot.sh stop     # 정지 + 등록 해제
-./scripts/bot.sh restart  # 재시작
-./scripts/bot.sh status   # 실행 상태 + PID + 메모리/CPU
-./scripts/bot.sh logs     # 실시간 트레이딩 로그
-./scripts/bot.sh errors   # 에러 로그 (마지막 50줄)
+# 시작 / 정지 / 재시작
+./scripts/bot.sh start      # 봇 시작 + 부팅 시 자동 시작 + 죽으면 자동 재시작
+./scripts/bot.sh stop       # 정지 + launchd 등록 해제 (실행 끄기)
+./scripts/bot.sh restart    # 재시작
+
+# 모니터링
+./scripts/bot.sh status     # 살아있는지 + PID + 메모리/CPU
+./scripts/bot.sh logs       # 실시간 트레이딩 로그 (Ctrl+C 종료)
+./scripts/bot.sh errors     # 에러 로그 (마지막 50줄)
 ```
 
 - 로그: `logs/trading.log` (매일 자정 자동 분할, 7일치 보관)

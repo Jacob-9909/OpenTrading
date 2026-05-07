@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from coin_trading.config import get_settings
@@ -13,8 +13,20 @@ class Base(DeclarativeBase):
 def create_db_engine(database_url: str | None = None):
     settings = get_settings()
     url = database_url or settings.database_url
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    return create_engine(url, echo=False, future=True, connect_args=connect_args)
+    is_sqlite = url.startswith("sqlite")
+    connect_args = {"check_same_thread": False} if is_sqlite else {}
+    eng = create_engine(url, echo=False, future=True, connect_args=connect_args)
+
+    if is_sqlite:
+        @event.listens_for(eng, "connect")
+        def _set_sqlite_pragma(dbapi_conn, _):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.close()
+
+    return eng
 
 
 engine = create_db_engine()

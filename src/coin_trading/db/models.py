@@ -89,7 +89,10 @@ class NewsItem(Base):
     summary: Mapped[str] = mapped_column(Text, default="")
     source: Mapped[str] = mapped_column(String(255))
     url: Mapped[str] = mapped_column(String(1000), unique=True)
+    sentiment: Mapped[str | None] = mapped_column(String(16), nullable=True)
     sentiment_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    categories: Mapped[list | None] = mapped_column(JSON, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 

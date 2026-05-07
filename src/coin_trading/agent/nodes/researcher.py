@@ -9,7 +9,14 @@ from coin_trading.agent.prompts.researcher_prompts import (
 logger = logging.getLogger(__name__)
 
 
-def researcher_debate_node(state: AgentState) -> dict:
+def sequential_debate_node(state: AgentState) -> dict:
+    """Run Bull then Bear sequentially.
+
+    Sequential by design: Bear must rebut Bull's specific argument, so it
+    needs Bull's output as input. Despite appearing as a single LangGraph
+    node, internally it is a two-step pipeline (Bull -> Bear), not a
+    parallel debate.
+    """
     logger.info("   -> [Node] Bullish Researcher is preparing arguments...")
     llm = state["researcher_llm"]
     tech = state.get("technical_report", "")
