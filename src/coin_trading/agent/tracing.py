@@ -1,7 +1,8 @@
 """Opik tracing helpers for LangGraph agent runs.
 
-Each LangGraph node becomes a span; per-node latency, inputs, and outputs
-are visible in the Opik dashboard. No-op when OPIK_API_KEY is unset.
+Wrap the compiled LangGraph once at construction time via
+``track_langgraph`` — every subsequent invoke is automatically traced.
+No-op when OPIK_API_KEY is unset.
 """
 
 from __future__ import annotations
@@ -40,22 +41,28 @@ def configure_opik(settings: Settings) -> bool:
             settings.opik_workspace or "default",
         )
         return True
-    except Exception as exc:  # opik install/auth failure must not crash trading
+    except Exception as exc:
         logger.warning("[Opik] failed to initialize: %s", exc)
         return False
 
 
-def get_langgraph_callbacks(settings: Settings) -> list[Any]:
-    """Return LangChain-compatible callbacks for LangGraph invoke().
+def wrap_graph_with_opik(app: Any, settings: Settings) -> Any:
+    """Wrap a compiled LangGraph with Opik tracing.
 
-    Empty list when Opik is disabled.
+    Returns the original ``app`` unchanged when Opik is disabled or the
+    integration cannot be loaded — callers should always replace their
+    handle with the return value.
     """
     if not configure_opik(settings):
-        return []
+        return app
     try:
-        from opik.integrations.langchain import OpikTracer
+        from opik.integrations.langchain import OpikTracer, track_langgraph
 
-        return [OpikTracer(project_name=settings.opik_project_name)]
+        tracer = OpikTracer(
+            project_name=settings.opik_project_name,
+            tags=["opentrading"],
+        )
+        return track_langgraph(app, tracer)
     except Exception as exc:
-        logger.warning("[Opik] OpikTracer unavailable: %s", exc)
-        return []
+        logger.warning("[Opik] failed to wrap LangGraph: %s", exc)
+        return app

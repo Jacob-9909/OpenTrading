@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from coin_trading.agent import create_trading_agent_graph
 from coin_trading.agent import TradingLLM
 from coin_trading.agent.context import LLMContextBuilder
-from coin_trading.agent.tracing import get_langgraph_callbacks
+from coin_trading.agent.tracing import wrap_graph_with_opik
 from coin_trading.config import Settings, get_settings
 from coin_trading.db.models import LLMDecision, SignalSide, TradeSignal
 
@@ -26,6 +26,10 @@ class StrategyService:
         self.researcher_llm = researcher_llm or llm
         self.context_builder = context_builder
         self.settings = settings or get_settings()
+        # Compile graph once + wrap with Opik tracer (no-op if OPIK_API_KEY unset).
+        self._agent_graph = wrap_graph_with_opik(
+            create_trading_agent_graph(), self.settings
+        )
 
     def create_signal(
         self,
@@ -37,16 +41,13 @@ class StrategyService:
         context = self.context_builder.build(session, symbol, timeframe, latest_price)
 
         logger.info("[Multi-Agent] Starting AI debate for %s...", symbol)
-        agent_graph = create_trading_agent_graph()
         initial_state = {
             "context": context,
             "llm": self.llm,
             "analyst_llm": self.analyst_llm,
             "researcher_llm": self.researcher_llm,
         }
-        callbacks = get_langgraph_callbacks(self.settings)
-        invoke_config = {"callbacks": callbacks} if callbacks else {}
-        final_state = agent_graph.invoke(initial_state, config=invoke_config)
+        final_state = self._agent_graph.invoke(initial_state)
         llm_result = final_state["final_result"]
         logger.info("[Multi-Agent] Debate concluded and Fund Manager made a decision.")
 
