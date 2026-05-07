@@ -24,7 +24,7 @@ Instrument: Simulated futures (Bithumb price feed). Leverage 1x. Both LONG and S
 
 Entry conditions (apply to both LONG and SHORT):
 1) Clear directional signal: trend aligned OR strong debate verdict (Bull STRONG for LONG, Bear STRONG for SHORT).
-2) Risk/reward ≥ 1.2:1 with a plausible stop level (recent swing, SMA band, or 1.0–2.5× ATR).
+2) Risk/reward ≥ 2:1. stop_loss MUST be ≥ 1.5× ATR away from entry; take_profit MUST be ≥ 3.0× ATR away from entry. Minimum absolute distance: SL ≥ 0.3% of entry, TP ≥ 0.6% of entry.
 3) At least 1 soft signal:
    • Momentum: RSI 25–80 for LONG / RSI > 20 for SHORT; MACD direction aligned.
    • Volume: volume_ratio ≥ 0.40 (< 0.12 = hard red flag).
@@ -46,8 +46,8 @@ Confidence thresholds:
 ## Risk and sizing
 - Never set allocation_pct above portfolio.max_position_allocation_pct.
 - Scale by confidence: < 0.60 → ≤ 50% of max; 0.60–0.75 → ≤ 75%; ≥ 0.75 → up to max.
-- LONG: stop_loss < entry_price < take_profit; risk/reward ≥ 1.2:1.
-- SHORT: take_profit < entry_price < stop_loss; risk/reward ≥ 1.2:1.
+- LONG: stop_loss < entry_price < take_profit; risk/reward ≥ 2:1; SL ≥ 1.5×ATR and ≥ 0.3% below entry; TP ≥ 3.0×ATR and ≥ 0.6% above entry.
+- SHORT: take_profit < entry_price < stop_loss; risk/reward ≥ 2:1; SL ≥ 1.5×ATR and ≥ 0.3% above entry; TP ≥ 3.0×ATR and ≥ 0.6% below entry.
 - leverage: always 1 for paper trading.
 
 ## Output (JSON only, no markdown)
@@ -246,6 +246,41 @@ def _normalize_payload(payload: dict) -> dict:
     return normalized
 
 
+def _enforce_min_sltp(payload: dict, price: float, atr: float) -> dict:
+    """Enforce minimum SL/TP distances. Expands tight levels to meet minimums."""
+    action = payload.get("action")
+    if action not in ("LONG", "SHORT"):
+        return payload
+
+    ep = payload.get("entry_price")
+    sl = payload.get("stop_loss")
+    tp = payload.get("take_profit")
+    if ep is None or sl is None or tp is None:
+        return payload
+
+    try:
+        ep_f, sl_f, tp_f = float(ep), float(sl), float(tp)
+    except (TypeError, ValueError):
+        return payload
+
+    min_sl_dist = max(atr * 1.5, ep_f * 0.003)
+    min_tp_dist = max(atr * 3.0, ep_f * 0.006)
+
+    result = dict(payload)
+    if action == "LONG":
+        if (ep_f - sl_f) < min_sl_dist:
+            result["stop_loss"] = round(ep_f - min_sl_dist, 8)
+        if (tp_f - ep_f) < min_tp_dist:
+            result["take_profit"] = round(ep_f + min_tp_dist, 8)
+    elif action == "SHORT":
+        if (sl_f - ep_f) < min_sl_dist:
+            result["stop_loss"] = round(ep_f + min_sl_dist, 8)
+        if (ep_f - tp_f) < min_tp_dist:
+            result["take_profit"] = round(ep_f - min_tp_dist, 8)
+
+    return result
+
+
 def _decision_or_hold(provider: str, model: str, payload: dict) -> TradingDecision:
     normalized = _normalize_payload(payload)
     try:
@@ -342,6 +377,9 @@ class OpenAITradingLLM(TradingLLM):
         )
         content = response.choices[0].message.content or "{}"
         payload = json.loads(content)
+        price = float(context.get("latest_price") or 0)
+        atr = float((context.get("technical_indicators") or {}).get("atr_14") or price * 0.02)
+        payload = _enforce_min_sltp(payload, price, atr)
         decision = _decision_or_hold(self.provider, self.model, payload)
         usage = response.usage.model_dump() if response.usage else None
         return LLMResult(
@@ -400,6 +438,9 @@ class OpenRouterTradingLLM(TradingLLM):
             raise
         content = response.choices[0].message.content or "{}"
         payload = json.loads(content)
+        price = float(context.get("latest_price") or 0)
+        atr = float((context.get("technical_indicators") or {}).get("atr_14") or price * 0.02)
+        payload = _enforce_min_sltp(payload, price, atr)
         decision = _decision_or_hold(self.provider, self.model, payload)
         usage = response.usage.model_dump() if response.usage else None
         return LLMResult(
@@ -438,6 +479,9 @@ class GeminiTradingLLM(TradingLLM):
             config={"response_mime_type": "application/json"},
         )
         payload = json.loads(response.text or "{}")
+        price = float(context.get("latest_price") or 0)
+        atr = float((context.get("technical_indicators") or {}).get("atr_14") or price * 0.02)
+        payload = _enforce_min_sltp(payload, price, atr)
         decision = _decision_or_hold(self.provider, self.model, payload)
         return LLMResult(
             provider=self.provider,
@@ -491,6 +535,9 @@ class NvidiaTradingLLM(TradingLLM):
 
         content = response.choices[0].message.content or "{}"
         payload = json.loads(content)
+        price = float(context.get("latest_price") or 0)
+        atr = float((context.get("technical_indicators") or {}).get("atr_14") or price * 0.02)
+        payload = _enforce_min_sltp(payload, price, atr)
         decision = _decision_or_hold(self.provider, self.model, payload)
         usage = response.usage.model_dump() if response.usage else None
         return LLMResult(

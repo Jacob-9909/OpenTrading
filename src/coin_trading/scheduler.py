@@ -10,7 +10,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
 
 from coin_trading.config import Settings
-from coin_trading.db.models import MarketCandle, Position, PositionStatus, RiskEventType, TradeSignal, SignalSide
+from coin_trading.db.models import MarketCandle, Position, PositionSide, PositionStatus, RiskEventType, TradeSignal, SignalSide
 from coin_trading.market.exchange.bithumb_ws import BithumbCandleStreamer, BithumbTickerMonitor
 from coin_trading.trade.execution.live_bithumb import BithumbLiveExecutor
 from coin_trading.db.session import SessionLocal
@@ -328,6 +328,27 @@ class TradingPipeline:
             if position and position.status == PositionStatus.OPEN:
                 self.executor.emergency_exit(session, position, mark_price, event.message)
                 logger.info("[risk] AUTO EXIT %s %s @ %s", event.event_type, event.symbol, mark_price)
+                self._send_exit_notification(position, event.event_type, mark_price)
+
+    def _send_exit_notification(self, position: Position, event_type: RiskEventType, mark_price: float) -> None:
+        if not self._telegram:
+            return
+        try:
+            pnl = (
+                (mark_price - position.entry_price) * position.quantity
+                if position.side == PositionSide.LONG
+                else (position.entry_price - mark_price) * position.quantity
+            )
+            label = "손절(SL)" if event_type == RiskEventType.STOP_LOSS else "익절(TP)"
+            message = (
+                f"[{position.symbol}] {label} 체결\n"
+                f"방향: {position.side.value}\n"
+                f"진입가: {position.entry_price:,.0f} | 체결가: {mark_price:,.0f}\n"
+                f"실현 PnL: {pnl:+,.0f} KRW"
+            )
+            self._telegram.send(message)
+        except Exception as exc:
+            logger.warning("[notify] 청산 알림 전송 실패: %s", exc)
 
     def _collection_timeframes(self) -> list[str]:
         timeframes = [self.settings.timeframe, *self.settings.analysis_timeframes, "1d"]
