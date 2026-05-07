@@ -171,7 +171,7 @@ def main() -> None:
                         )
                     )
                 fig.update_layout(height=620, xaxis_rangeslider_visible=False)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             else:
                 st.info("차트 캔들 없음. 자동 수집을 켜거나 `refresh-data`를 실행하세요.")
 
@@ -192,7 +192,7 @@ def main() -> None:
                         if open_positions:
                             st.dataframe(
                                 _open_position_rows(open_positions, currency),
-                                use_container_width=True,
+                                width="stretch",
                                 hide_index=True,
                                 column_config={
                                     "종목": st.column_config.TextColumn(width="small"),
@@ -233,7 +233,7 @@ def main() -> None:
                         if signals:
                             st.dataframe(
                                 _signal_rows(signals, currency),
-                                use_container_width=True,
+                                width="stretch",
                                 hide_index=True,
                                 column_config={
                                     "시각": st.column_config.TextColumn(width="medium"),
@@ -261,7 +261,7 @@ def main() -> None:
                         if all_orders:
                             st.dataframe(
                                 _order_rows(all_orders, currency),
-                                use_container_width=True,
+                                width="stretch",
                                 hide_index=True,
                                 column_config={
                                     "시각": st.column_config.TextColumn(width="medium"),
@@ -363,14 +363,12 @@ def _sidebar_controls(settings, mode_label: str):
     auto_refresh_chart = st.sidebar.checkbox("로드 시 차트 캔들 새로고침", value=True)
     auto_refresh_enabled = st.sidebar.checkbox(
         "페이지 자동 새로고침",
-        value=st.session_state.auto_refresh_enabled,
         key="auto_refresh_enabled",
     )
     auto_refresh_seconds = st.sidebar.number_input(
         "자동 새로고침 간격 (초)",
         min_value=10,
         max_value=3600,
-        value=st.session_state.auto_refresh_seconds,
         step=10,
         disabled=not auto_refresh_enabled,
         key="auto_refresh_seconds",
@@ -409,7 +407,7 @@ def _render_trade_history(positions: list[Position], currency: str) -> None:
     s3.metric("총 매매 횟수", total)
     st.dataframe(
         pd.DataFrame(rows),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "종목": st.column_config.TextColumn(width="small"),
@@ -445,7 +443,7 @@ def _render_risk_events(events: list[RiskEvent]) -> None:
     ]
     st.dataframe(
         pd.DataFrame(rows),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "시각": st.column_config.TextColumn(width="medium"),
@@ -483,7 +481,7 @@ def _render_llm_decisions(decisions: list[LLMDecision]) -> None:
 
     st.dataframe(
         pd.DataFrame(rows),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "시각": st.column_config.TextColumn(width="medium"),
