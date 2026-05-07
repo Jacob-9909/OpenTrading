@@ -222,6 +222,44 @@ COINDESK_FETCH_LIMIT=50
 
 ---
 
+## Observability (Opik)
+
+각 LangGraph 노드의 latency / 입출력 / 토큰 사용량을 [Opik](https://www.comet.com/opik) 대시보드에서 트레이싱.
+
+### 설정
+
+```env
+OPIK_API_KEY=...
+OPIK_WORKSPACE=your-workspace      # 미설정 시 default
+OPIK_PROJECT_NAME=opentrading
+```
+
+미설정이면 트레이싱 자동 비활성 (no-op). 거래 흐름에 영향 없음.
+
+### 캡처되는 정보
+
+| Span | 측정 |
+|---|---|
+| `technical_analyst` | LLM 호출 시간, prompt/response, tokens |
+| `sentiment_analyst` | (병렬 실행 — analyst 둘 중 느린 쪽이 bottleneck) |
+| `sequential_debate` | Bull → Bear 순차 시간 (가장 큰 latency 원인) |
+| `fund_manager` | 최종 JSON 결정 latency |
+
+### 로컬 로그에도 elapsed 출력
+
+Opik 미설정 시에도 stdout / `logs/trading.log`에서 노드별 시간 확인 가능:
+
+```
+   <- [Node] Technical Analyst finished in 2.34s.
+   <- [Node] Sentiment Analyst finished in 3.11s.
+   <- Bull finished in 4.87s
+   <- Bear finished in 5.20s
+   <- [Node] Debate concluded (bull=4.87s bear=5.20s total=10.07s).
+   <- [Node] Fund Manager finished in 6.42s.
+```
+
+---
+
 ## 알림 시스템
 
 Slack Incoming Webhook으로 모든 알림 발송.

@@ -1,4 +1,5 @@
 import logging
+import time
 
 from coin_trading.agent.state import AgentState
 from coin_trading.agent.prompts.researcher_prompts import (
@@ -18,21 +19,30 @@ def sequential_debate_node(state: AgentState) -> dict:
     parallel debate.
     """
     logger.info("   -> [Node] Bullish Researcher is preparing arguments...")
+    bull_started = time.perf_counter()
     llm = state["researcher_llm"]
     tech = state.get("technical_report", "")
     sent = state.get("sentiment_report", "")
 
     bull_prompt = f"Technical Report:\n{tech}\n\nSentiment Report:\n{sent}"
     bull_arg = llm.chat(BULL_RESEARCHER_SYSTEM_PROMPT, bull_prompt)
+    bull_elapsed = time.perf_counter() - bull_started
     logger.info("[BULL ARGUMENT]\n%s", bull_arg)
+    logger.info("   <- Bull finished in %.2fs", bull_elapsed)
 
     logger.info("   -> [Node] Bearish Researcher is attacking arguments...")
+    bear_started = time.perf_counter()
     bear_prompt = (
         f"Technical Report:\n{tech}\n\nSentiment Report:\n{sent}\n\n"
         f"Bull Argument (rebut this):\n{bull_arg}"
     )
     bear_arg = llm.chat(BEAR_RESEARCHER_SYSTEM_PROMPT, bear_prompt)
+    bear_elapsed = time.perf_counter() - bear_started
     logger.info("[BEAR ARGUMENT]\n%s", bear_arg)
+    logger.info("   <- Bear finished in %.2fs", bear_elapsed)
 
-    logger.info("   <- [Node] Debate concluded.")
+    logger.info(
+        "   <- [Node] Debate concluded (bull=%.2fs bear=%.2fs total=%.2fs).",
+        bull_elapsed, bear_elapsed, bull_elapsed + bear_elapsed,
+    )
     return {"bull_argument": bull_arg, "bear_argument": bear_arg}

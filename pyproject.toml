@@ -27,6 +27,7 @@ dependencies = [
     "langgraph>=1.1.10",
     "yfinance",
     "streamlit-autorefresh>=1.0.1",
+    "opik>=2.0.23",
 ]
 
 [project.optional-dependencies]

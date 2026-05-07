@@ -3,9 +3,11 @@ import logging
 from sqlalchemy.orm import Session
 
 from coin_trading.agent import create_trading_agent_graph
-from coin_trading.db.models import LLMDecision, SignalSide, TradeSignal
 from coin_trading.agent import TradingLLM
 from coin_trading.agent.context import LLMContextBuilder
+from coin_trading.agent.tracing import get_langgraph_callbacks
+from coin_trading.config import Settings, get_settings
+from coin_trading.db.models import LLMDecision, SignalSide, TradeSignal
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +19,13 @@ class StrategyService:
         context_builder: LLMContextBuilder,
         analyst_llm: TradingLLM | None = None,
         researcher_llm: TradingLLM | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self.llm = llm
         self.analyst_llm = analyst_llm or llm
         self.researcher_llm = researcher_llm or llm
         self.context_builder = context_builder
+        self.settings = settings or get_settings()
 
     def create_signal(
         self,
@@ -40,7 +44,9 @@ class StrategyService:
             "analyst_llm": self.analyst_llm,
             "researcher_llm": self.researcher_llm,
         }
-        final_state = agent_graph.invoke(initial_state)
+        callbacks = get_langgraph_callbacks(self.settings)
+        invoke_config = {"callbacks": callbacks} if callbacks else {}
+        final_state = agent_graph.invoke(initial_state, config=invoke_config)
         llm_result = final_state["final_result"]
         logger.info("[Multi-Agent] Debate concluded and Fund Manager made a decision.")
 

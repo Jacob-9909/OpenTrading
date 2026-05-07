@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 
 from coin_trading.agent.state import AgentState
 
@@ -8,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 def fund_manager_node(state: AgentState) -> dict:
     logger.info("   -> [Node] Fund Manager is reviewing all insights to decide...")
+    started = time.perf_counter()
     llm = state["llm"]
     context = state["context"]
 
@@ -23,9 +25,10 @@ def fund_manager_node(state: AgentState) -> dict:
     enriched_context.pop("news", None)
 
     result = llm.decide(enriched_context)
+    elapsed = time.perf_counter() - started
     logger.info(
         "[FUND MANAGER DECISION]\n%s",
         json.dumps(result.decision.model_dump(), indent=2, ensure_ascii=False),
     )
-    logger.info("   <- [Node] Fund Manager has signed the final decision.")
+    logger.info("   <- [Node] Fund Manager finished in %.2fs.", elapsed)
     return {"final_result": result}

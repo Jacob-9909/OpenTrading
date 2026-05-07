@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     vertex_location: str = "us-central1"
     google_application_credentials: str | None = None
 
+    # Opik (LLM observability — per-agent latency tracing)
+    opik_api_key: str | None = None
+    opik_workspace: str | None = None
+    opik_project_name: str = "opentrading"
+
     @field_validator(
         "news_rss_urls",
         "analysis_timeframes",
