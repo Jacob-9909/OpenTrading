@@ -131,28 +131,52 @@ def main() -> None:
                 candle_duration = pd.Timedelta(minutes=timeframe_minutes(chart_timeframe))
                 order_df = _orders_in_range(orders, candle_df["time"].min(), candle_df["time"].max() + candle_duration)
                 if not order_df.empty:
-                    buy_df = order_df[order_df["side"] == "BUY"]
-                    sell_df = order_df[order_df["side"] == "SELL"]
-                    if not buy_df.empty:
+                    long_open_df = order_df[order_df["signal_side"] == "LONG"]
+                    short_open_df = order_df[order_df["signal_side"] == "SHORT"]
+                    close_df = order_df[~order_df["signal_side"].isin(["LONG", "SHORT"])]
+                    if not long_open_df.empty:
                         fig.add_trace(
                             go.Scatter(
-                                x=buy_df["time"],
-                                y=buy_df["price"],
+                                x=long_open_df["time"],
+                                y=long_open_df["price"],
                                 mode="markers",
-                                marker={"size": 12, "color": "#26a69a", "symbol": "triangle-up"},
-                                name="매수",
+                                marker={"size": 13, "color": "#26a69a", "symbol": "triangle-up"},
+                                name="LONG 진입",
                             )
                         )
-                    if not sell_df.empty:
+                    if not short_open_df.empty:
                         fig.add_trace(
                             go.Scatter(
-                                x=sell_df["time"],
-                                y=sell_df["price"],
+                                x=short_open_df["time"],
+                                y=short_open_df["price"],
                                 mode="markers",
-                                marker={"size": 12, "color": "#ef5350", "symbol": "triangle-down"},
-                                name="매도",
+                                marker={"size": 13, "color": "#ef5350", "symbol": "triangle-down"},
+                                name="SHORT 진입",
                             )
                         )
+                    if not close_df.empty:
+                        long_close_df = close_df[close_df["side"] == "SELL"]
+                        short_close_df = close_df[close_df["side"] == "BUY"]
+                        if not long_close_df.empty:
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=long_close_df["time"],
+                                    y=long_close_df["price"],
+                                    mode="markers",
+                                    marker={"size": 13, "color": "#80cbc4", "symbol": "x", "line": {"width": 2, "color": "#26a69a"}},
+                                    name="LONG 청산",
+                                )
+                            )
+                        if not short_close_df.empty:
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=short_close_df["time"],
+                                    y=short_close_df["price"],
+                                    mode="markers",
+                                    marker={"size": 13, "color": "#ef9a9a", "symbol": "x", "line": {"width": 2, "color": "#ef5350"}},
+                                    name="SHORT 청산",
+                                )
+                            )
                 hold_df = _hold_signals_in_range(
                     session,
                     settings.symbol,
@@ -574,11 +598,15 @@ def _chart_candle_limit(days: int, timeframe: str) -> int:
 def _orders_in_range(orders: list[PaperOrder], start, end) -> pd.DataFrame:
     start_ts = _as_utc_timestamp(start)
     end_ts = _as_utc_timestamp(end)
-    rows = [
-        {"time": order.created_at, "price": order.price, "side": order.side.value}
-        for order in orders
-        if order.price and start_ts <= _as_utc_timestamp(order.created_at) <= end_ts
-    ]
+    rows = []
+    for order in orders:
+        if not order.price or not (start_ts <= _as_utc_timestamp(order.created_at) <= end_ts):
+            continue
+        if order.signal is not None:
+            signal_side = order.signal.side.value
+        else:
+            signal_side = "CLOSE_POSITION"
+        rows.append({"time": order.created_at, "price": order.price, "side": order.side.value, "signal_side": signal_side})
     return pd.DataFrame(rows)
 
 

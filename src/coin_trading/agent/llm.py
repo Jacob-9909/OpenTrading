@@ -363,6 +363,46 @@ class GeminiTradingLLM(TradingLLM):
         return response.text or ""
 
 
+class VertexTradingLLM(TradingLLM):
+    provider = "vertex"
+
+    def __init__(self, project_id: str, model: str, location: str, credentials_path: str | None = None) -> None:
+        import os
+        from google import genai
+
+        if credentials_path:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        self.client = genai.Client(vertexai=True, project=project_id, location=location)
+        self.model = model
+
+    def decide(self, context: dict) -> LLMResult:
+        system_prompt = get_system_prompt(context.get("exchange", "bithumb_spot"))
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=f"{system_prompt}\n\nContext:\n{json.dumps(context, ensure_ascii=False)}",
+            config={"response_mime_type": "application/json"},
+        )
+        payload = json.loads(response.text or "{}")
+        price = float(context.get("latest_price") or 0)
+        atr = float((context.get("technical_indicators") or {}).get("atr_14") or price * 0.02)
+        payload = _enforce_min_sltp(payload, price, atr)
+        decision = _decision_or_hold(self.provider, self.model, payload)
+        return LLMResult(
+            provider=self.provider,
+            model=self.model,
+            decision=decision,
+            raw_response=payload,
+            token_usage=None,
+        )
+
+    def chat(self, system: str, user: str) -> str:
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=f"{system}\n\nUser:\n{user}",
+        )
+        return response.text or ""
+
+
 class NvidiaTradingLLM(TradingLLM):
     provider = "nvidia"
 
@@ -450,6 +490,15 @@ def create_llm(settings: Settings) -> TradingLLM:
         if not settings.gemini_api_key:
             raise ValueError("GEMINI_API_KEY is required when LLM_PROVIDER=gemini.")
         return GeminiTradingLLM(api_key=settings.gemini_api_key, model=settings.llm_model)
+    if settings.llm_provider == "vertex":
+        if not settings.vertex_project_id:
+            raise ValueError("VERTEX_PROJECT_ID is required when LLM_PROVIDER=vertex.")
+        return VertexTradingLLM(
+            project_id=settings.vertex_project_id,
+            model=settings.vertex_model_id,
+            location=settings.vertex_location,
+            credentials_path=settings.google_application_credentials,
+        )
     if settings.llm_provider == "nvidia":
         if not settings.nvidia_api_key:
             raise ValueError("NVIDIA_API_KEY is required when LLM_PROVIDER=nvidia.")

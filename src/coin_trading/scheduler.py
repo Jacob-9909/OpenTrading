@@ -194,30 +194,21 @@ class TradingPipeline:
                 timeframe=self.settings.timeframe,
                 latest_price=latest_price,
             )
+            execution_price = self.market_data.get_mark_price(self.settings.symbol) if self._ws_active else latest_price
             if self._ws_active:
-                current_price = self.market_data.get_mark_price(self.settings.symbol)
-                drift = abs(current_price - snapshot_price) / snapshot_price
-                threshold = self.settings.price_consistency_threshold_pct / 100
-                if drift > threshold:
-                    logger.warning(
-                        "[decide] PRICE_DRIFTED: snapshot=%s current=%s drift=%.2f%% > threshold=%.2f%%",
-                        snapshot_price, current_price, drift * 100, threshold * 100,
-                    )
-                    return PipelineResult(
-                        latest_price=current_price,
-                        signal_id=signal.id,
-                        signal_status="PRICE_DRIFTED",
-                        order_id=None,
-                        risk_reason=f"price drifted {drift:.2%} during LLM decision",
-                    )
-            approval = self.risk.evaluate(session, signal, latest_price)
+                drift = abs(execution_price - snapshot_price) / snapshot_price
+                logger.info(
+                    "[decide] execution_price=%s snapshot=%s drift=%.2f%%",
+                    execution_price, snapshot_price, drift * 100,
+                )
+            approval = self.risk.evaluate(session, signal, execution_price)
             order = None
             if self.settings.trading_mode != "signal_only":
-                order = self.executor.execute(session, signal, approval, latest_price)
+                order = self.executor.execute(session, signal, approval, execution_price)
             if signal.side in {SignalSide.LONG, SignalSide.SHORT}:
-                self._send_trade_notification(session, signal, latest_price)
+                self._send_trade_notification(session, signal, execution_price)
             return PipelineResult(
-                latest_price=latest_price,
+                latest_price=execution_price,
                 signal_id=signal.id,
                 signal_status=signal.status,
                 order_id=order.id if order else None,

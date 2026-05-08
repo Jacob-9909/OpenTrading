@@ -57,6 +57,7 @@ class LLMContextBuilder:
             "quarter_summary": self._market_summary(session, symbol=symbol, days=90),
             "portfolio": self._portfolio_payload(session, symbol=symbol, latest_price=latest_price, snapshot=snapshot),
             "technical_indicators": indicators.values if indicators else {},
+            "primary_atr": float(indicators.values.get("atr_14") or 0) if indicators else 0,
             "multi_timeframe": self._multi_timeframe_indicators(session, symbol),
             "news": [
                 {

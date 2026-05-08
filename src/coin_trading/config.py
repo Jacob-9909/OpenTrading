@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     liquidation_buffer: float = Field(default=0.08, gt=0, le=0.50)
     kill_switch_drawdown: float = Field(default=0.10, gt=0, le=0.90)
 
-    llm_provider: Literal["mock", "openai", "gemini", "openrouter", "nvidia"] = "mock"
+    llm_provider: Literal["mock", "openai", "gemini", "openrouter", "nvidia", "vertex"] = "mock"
     llm_model: str = "gpt-4o-mini"
     analyst_llm_provider: str | None = None   # falls back to llm_provider if unset
     analyst_llm_model: str | None = None      # falls back to llm_model if unset

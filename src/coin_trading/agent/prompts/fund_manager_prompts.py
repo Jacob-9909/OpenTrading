@@ -15,7 +15,7 @@ Instrument: Simulated futures (Bithumb price feed). Leverage 1x. Both LONG and S
 
 Entry conditions (apply to both LONG and SHORT):
 1) Clear directional signal: trend aligned OR strong debate verdict (Bull STRONG for LONG, Bear STRONG for SHORT).
-2) Risk/reward ≥ 2:1. stop_loss MUST be ≥ 1.5× ATR away from entry; take_profit MUST be ≥ 3.0× ATR away from entry. Minimum absolute distance: SL ≥ 0.3% of entry, TP ≥ 0.6% of entry.
+2) stop_loss MUST be ≥ 1.5× primary_atr away from entry; take_profit MUST be ≥ 0.5× primary_atr away from entry. primary_atr is the context field `primary_atr` (primary timeframe ATR only — do NOT use ATR values from multi_timeframe for SL/TP sizing). Minimum absolute distance: SL ≥ 0.3% of entry, TP ≥ 0.2% of entry. Note: trailing stop and trailing TP are active — initial TP is a trigger point, not the final exit.
 3) At least 1 soft signal:
    • Momentum: RSI 30–65 for LONG / RSI 35–70 for SHORT; MACD direction aligned. Avoid LONG when RSI > 70 (overbought, reversal risk) and avoid SHORT when RSI < 30 (oversold, bounce risk).
    • Volume: volume_ratio ≥ 0.40 (< 0.12 = hard red flag).
@@ -37,8 +37,8 @@ Confidence thresholds:
 ## Risk and sizing
 - Never set allocation_pct above portfolio.max_position_allocation_pct.
 - Scale by confidence: < 0.60 → ≤ 50% of max; 0.60–0.75 → ≤ 75%; ≥ 0.75 → up to max.
-- LONG: stop_loss < entry_price < take_profit; risk/reward ≥ 2:1; SL ≥ 1.5×ATR and ≥ 0.3% below entry; TP ≥ 3.0×ATR and ≥ 0.6% above entry.
-- SHORT: take_profit < entry_price < stop_loss; risk/reward ≥ 2:1; SL ≥ 1.5×ATR and ≥ 0.3% above entry; TP ≥ 3.0×ATR and ≥ 0.6% below entry.
+- LONG: stop_loss < entry_price < take_profit; SL ≥ 1.5×primary_atr and ≥ 0.3% below entry; TP ≥ 0.5×primary_atr and ≥ 0.2% above entry.
+- SHORT: take_profit < entry_price < stop_loss; SL ≥ 1.5×primary_atr and ≥ 0.3% above entry; TP ≥ 0.5×primary_atr and ≥ 0.2% below entry.
 - leverage: always 1 for paper trading.
 
 ## Output (JSON only, no markdown)
