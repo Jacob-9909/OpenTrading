@@ -14,12 +14,13 @@ Instrument: Simulated futures (Bithumb price feed). Leverage 1x. Both LONG and S
 - HOLD  : no clear edge. No entry fields needed.
 
 Entry conditions (apply to both LONG and SHORT):
-1) Clear directional signal: trend aligned OR strong debate verdict (Bull STRONG for LONG, Bear STRONG for SHORT).
-2) stop_loss MUST be ≥ 1.5× primary_atr away from entry; take_profit MUST be ≥ 0.5× primary_atr away from entry. primary_atr is the context field `primary_atr` (primary timeframe ATR only — do NOT use ATR values from multi_timeframe for SL/TP sizing). Minimum absolute distance: SL ≥ 0.3% of entry, TP ≥ 0.2% of entry. Note: trailing stop and trailing TP are active — initial TP is a trigger point, not the final exit.
-3) At least 1 soft signal:
-   • Momentum: RSI 30–65 for LONG / RSI 35–70 for SHORT; MACD direction aligned. Avoid LONG when RSI > 70 (overbought, reversal risk) and avoid SHORT when RSI < 30 (oversold, bounce risk).
+1) Debate verdict required: Bull WEAK+ for LONG, Bear WEAK+ for SHORT. Debate is the primary signal — trend alone is never sufficient to enter.
+2) stop_loss MUST be ≥ 2.0× primary_atr away from entry; take_profit MUST be ≥ 1.0× primary_atr away from entry. primary_atr is the context field `primary_atr` (primary timeframe ATR only — do NOT use ATR values from multi_timeframe for SL/TP sizing). Minimum absolute distance: SL ≥ 0.3% of entry, TP ≥ 0.2% of entry. Note: trailing stop and trailing TP are active — initial TP is a trigger point, not the final exit.
+3) At least 2 of the following signals must align:
+   • Trend: bullish_strong or bullish_weak for LONG; bearish_strong or bearish_weak for SHORT. neutral trend → does not count.
+   • Momentum: RSI 30–65 for LONG / RSI 35–70 for SHORT; MACD direction aligned. Avoid LONG when RSI > 70 (overbought) and avoid SHORT when RSI < 30 (oversold).
    • Volume: volume_ratio ≥ 0.40 (< 0.12 = hard red flag).
-   • Debate: Bull/Bear verdict WEAK+ on the relevant side.
+   • Multi-timeframe: majority of 30m, 1h, 4h agree on direction.
 
 Confidence thresholds:
 - 1 soft: 0.50–0.65
@@ -37,8 +38,8 @@ Confidence thresholds:
 ## Risk and sizing
 - Never set allocation_pct above portfolio.max_position_allocation_pct.
 - Scale by confidence: < 0.60 → ≤ 50% of max; 0.60–0.75 → ≤ 75%; ≥ 0.75 → up to max.
-- LONG: stop_loss < entry_price < take_profit; SL ≥ 1.5×primary_atr and ≥ 0.3% below entry; TP ≥ 0.5×primary_atr and ≥ 0.2% above entry.
-- SHORT: take_profit < entry_price < stop_loss; SL ≥ 1.5×primary_atr and ≥ 0.3% above entry; TP ≥ 0.5×primary_atr and ≥ 0.2% below entry.
+- LONG: stop_loss < entry_price < take_profit; SL ≥ 1.5×primary_atr and ≥ 0.3% below entry; TP ≥ 1.0×primary_atr and ≥ 0.2% above entry.
+- SHORT: take_profit < entry_price < stop_loss; SL ≥ 1.5×primary_atr and ≥ 0.3% above entry; TP ≥ 1.0×primary_atr and ≥ 0.2% below entry.
 - leverage: always 1 for paper trading.
 
 ## Output (JSON only, no markdown)

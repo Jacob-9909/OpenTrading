@@ -84,7 +84,15 @@ class IndicatorCalculator:
         result["adx_14"] = IndicatorCalculator._adx(high, low, close, period=14)
         result["volume_sma_20"] = volume.rolling(20).mean()
         result["volume_ratio"] = volume / result["volume_sma_20"]
-        result["trend"] = np.where(result["ema_12"] >= result["ema_26"], "bullish", "bearish")
+        ema_gap_pct = (result["ema_12"] - result["ema_26"]) / result["ema_26"] * 100
+        result["trend"] = np.where(
+            ema_gap_pct >= 0.15, "bullish_strong",
+            np.where(ema_gap_pct >= 0.03, "bullish_weak",
+            np.where(ema_gap_pct <= -0.15, "bearish_strong",
+            np.where(ema_gap_pct <= -0.03, "bearish_weak",
+            "neutral")))
+        )
+        result["trend_strength"] = ema_gap_pct.abs()
         return result
 
     @staticmethod

@@ -1,7 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
+
 from streamlit_autorefresh import st_autorefresh
 
 from coin_trading.config import get_settings
@@ -200,128 +200,90 @@ def main() -> None:
                 st.info("차트 캔들 없음. 자동 수집을 켜거나 `refresh-data`를 실행하세요.")
 
         # ── Tabs ──────────────────────────────────────────────────────────────
-        all_section_keys = ["보유 포지션", "매매 기록", "신호", "주문", "리스크 이벤트", "LLM 결정"]
-        available_sections = [s for s in all_section_keys if s in sections]
-        if available_sections:
-            tabs = st.tabs(available_sections)
-            for tab, section in zip(tabs, available_sections, strict=True):
-                with tab:
-                    if section == "보유 포지션":
-                        open_positions = (
-                            session.query(Position)
-                            .filter_by(status=PositionStatus.OPEN)
-                            .order_by(Position.opened_at.desc())
-                            .all()
-                        )
-                        if open_positions:
-                            st.dataframe(
-                                _open_position_rows(open_positions, currency),
-                                width="stretch",
-                                hide_index=True,
-                                column_config={
-                                    "종목": st.column_config.TextColumn(width="small"),
-                                    "방향": st.column_config.TextColumn(width="small"),
-                                    "수량": st.column_config.TextColumn(width="small"),
-                                    "평균 매수가": st.column_config.TextColumn(width="medium"),
-                                    "현재가": st.column_config.TextColumn(width="medium"),
-                                    "미실현 손익": st.column_config.TextColumn(width="medium"),
-                                    "수익률": st.column_config.TextColumn(width="small"),
-                                    "투자 금액": st.column_config.TextColumn(width="medium"),
-                                    "손절가": st.column_config.TextColumn(width="medium"),
-                                    "익절가": st.column_config.TextColumn(width="medium"),
-                                    "매수 시각": st.column_config.TextColumn(width="medium"),
-                                },
-                            )
-                        else:
-                            st.info("현재 보유 포지션 없음")
+        tab_현황, tab_매매, tab_llm = st.tabs(["📊 현황", "📋 매매 기록", "🤖 LLM 분석"])
 
-                    elif section == "매매 기록":
-                        closed_positions = (
-                            session.query(Position)
-                            .filter_by(status=PositionStatus.CLOSED)
-                            .order_by(Position.closed_at.desc())
-                            .all()
-                        )
-                        if closed_positions:
-                            _render_trade_history(closed_positions, currency)
-                        else:
-                            st.info("완료된 매매 기록 없음")
+        with tab_현황:
+            open_positions = (
+                session.query(Position)
+                .filter_by(status=PositionStatus.OPEN)
+                .order_by(Position.opened_at.desc())
+                .all()
+            )
+            st.subheader("보유 포지션")
+            if open_positions:
+                st.dataframe(
+                    _open_position_rows(open_positions, currency),
+                    width="stretch",
+                    hide_index=True,
+                )
+            else:
+                st.info("현재 보유 포지션 없음")
 
-                    elif section == "신호":
-                        signals = (
-                            session.query(TradeSignal)
-                            .order_by(TradeSignal.created_at.desc())
-                            .limit(200)
-                            .all()
-                        )
-                        if signals:
-                            st.dataframe(
-                                _signal_rows(signals, currency),
-                                width="stretch",
-                                hide_index=True,
-                                column_config={
-                                    "시각": st.column_config.TextColumn(width="medium"),
-                                    "방향": st.column_config.TextColumn(width="small"),
-                                    "신뢰도": st.column_config.ProgressColumn(
-                                        min_value=0, max_value=1, format="%.2f", width="small"
-                                    ),
-                                    "진입가": st.column_config.TextColumn(width="medium"),
-                                    "손절": st.column_config.TextColumn(width="medium"),
-                                    "익절": st.column_config.TextColumn(width="medium"),
-                                    "상태": st.column_config.TextColumn(width="small"),
-                                    "근거": st.column_config.TextColumn(width="large"),
-                                },
-                            )
-                        else:
-                            st.info("신호 없음")
+            st.subheader("최근 신호 (20건)")
+            recent_signals = (
+                session.query(TradeSignal)
+                .order_by(TradeSignal.created_at.desc())
+                .limit(20)
+                .all()
+            )
+            if recent_signals:
+                _sig_df = _signal_rows(recent_signals, currency)
+                st.dataframe(
+                    _sig_df.style.map(_dir_cell_style, subset=["방향"]),
+                    width="stretch",
+                    hide_index=True,
+                )
 
-                    elif section == "주문":
-                        all_orders = (
-                            session.query(PaperOrder)
-                            .order_by(PaperOrder.created_at.desc())
-                            .limit(200)
-                            .all()
-                        )
-                        if all_orders:
-                            st.dataframe(
-                                _order_rows(all_orders, currency),
-                                width="stretch",
-                                hide_index=True,
-                                column_config={
-                                    "시각": st.column_config.TextColumn(width="medium"),
-                                    "방향": st.column_config.TextColumn(width="small"),
-                                    "수량": st.column_config.TextColumn(width="small"),
-                                    "가격": st.column_config.TextColumn(width="medium"),
-                                    "상태": st.column_config.TextColumn(width="small"),
-                                    "사유": st.column_config.TextColumn(width="large"),
-                                },
-                            )
-                        else:
-                            st.info("주문 없음")
+            st.subheader("리스크 이벤트 (최근 30건)")
+            risk_events = (
+                session.query(RiskEvent)
+                .order_by(RiskEvent.created_at.desc())
+                .limit(30)
+                .all()
+            )
+            if risk_events:
+                _render_risk_events(risk_events)
+            else:
+                st.info("리스크 이벤트 없음")
 
-                    elif section == "리스크 이벤트":
-                        risk_events = (
-                            session.query(RiskEvent)
-                            .order_by(RiskEvent.created_at.desc())
-                            .limit(200)
-                            .all()
-                        )
-                        if risk_events:
-                            _render_risk_events(risk_events)
-                        else:
-                            st.info("리스크 이벤트 없음")
+        with tab_매매:
+            closed_positions = (
+                session.query(Position)
+                .filter_by(status=PositionStatus.CLOSED)
+                .order_by(Position.closed_at.desc())
+                .all()
+            )
+            if closed_positions:
+                _render_trade_history(closed_positions, currency)
+            else:
+                st.info("완료된 매매 기록 없음")
 
-                    elif section == "LLM 결정":
-                        decisions = (
-                            session.query(LLMDecision)
-                            .order_by(LLMDecision.created_at.desc())
-                            .limit(100)
-                            .all()
-                        )
-                        if decisions:
-                            _render_llm_decisions(decisions)
-                        else:
-                            st.info("LLM 결정 기록 없음")
+        with tab_llm:
+            decisions = (
+                session.query(LLMDecision)
+                .order_by(LLMDecision.created_at.desc())
+                .limit(100)
+                .all()
+            )
+            if decisions:
+                _render_llm_decisions(decisions)
+            else:
+                st.info("LLM 결정 기록 없음")
+
+            st.subheader("전체 신호")
+            all_signals = (
+                session.query(TradeSignal)
+                .order_by(TradeSignal.created_at.desc())
+                .limit(200)
+                .all()
+            )
+            if all_signals:
+                _all_sig_df = _signal_rows(all_signals, currency)
+                st.dataframe(
+                    _all_sig_df.style.map(_dir_cell_style, subset=["방향"]),
+                    width="stretch",
+                    hide_index=True,
+                )
     finally:
         session.close()
     _auto_refresh(auto_refresh_seconds)
@@ -349,6 +311,37 @@ def _money(value: float, currency: str) -> str:
     if currency == "KRW":
         return f"{value:,.0f} KRW"
     return f"{value:,.2f} {currency}"
+
+
+def _pnl_row_style(row: pd.Series) -> list[str]:
+    pnl = row.get("_pnl_raw") or 0
+    if pnl > 0:
+        bg = "background-color: rgba(38, 166, 154, 0.12)"
+    elif pnl < 0:
+        bg = "background-color: rgba(239, 83, 80, 0.12)"
+    else:
+        bg = ""
+    return [bg] * len(row)
+
+
+def _dir_cell_style(val: str) -> str:
+    v = str(val)
+    if v == "LONG":
+        return "background-color: rgba(38, 166, 154, 0.28); font-weight: bold"
+    if v == "SHORT":
+        return "background-color: rgba(239, 83, 80, 0.28); font-weight: bold"
+    return "color: #607d8b"
+
+
+def _signal_action_style(val: str) -> str:
+    v = str(val).upper()
+    if "LONG" in v:
+        return "background-color: rgba(38, 166, 154, 0.28); font-weight: bold"
+    if "SHORT" in v:
+        return "background-color: rgba(239, 83, 80, 0.28); font-weight: bold"
+    if "HOLD" in v:
+        return "color: #607d8b"
+    return ""
 
 
 def _baseline_equity(session, settings, current_equity: float) -> float:
@@ -422,6 +415,7 @@ def _render_trade_history(positions: list[Position], currency: str) -> None:
             "수익률": f"{pnl_pct:+.2f}%",
             "매수 시각": pos.opened_at.strftime("%Y-%m-%d %H:%M") if pos.opened_at else "",
             "매도 시각": pos.closed_at.strftime("%Y-%m-%d %H:%M") if pos.closed_at else "",
+            "_pnl_raw": pnl,
         })
 
     total = len(positions)
@@ -429,21 +423,14 @@ def _render_trade_history(positions: list[Position], currency: str) -> None:
     s1.metric("총 실현 손익", _money(total_pnl, currency))
     s2.metric("승률", f"{wins / total * 100:.1f}%" if total > 0 else "—", f"{wins}승 {total - wins}패")
     s3.metric("총 매매 횟수", total)
+    df = pd.DataFrame(rows)
     st.dataframe(
-        pd.DataFrame(rows),
+        df.style
+        .apply(_pnl_row_style, axis=1)
+        .map(_dir_cell_style, subset=["방향"])
+        .hide(["_pnl_raw"], axis="columns"),
         width="stretch",
         hide_index=True,
-        column_config={
-            "종목": st.column_config.TextColumn(width="small"),
-            "방향": st.column_config.TextColumn(width="small"),
-            "수량": st.column_config.TextColumn(width="small"),
-            "매수가": st.column_config.TextColumn(width="medium"),
-            "매도가": st.column_config.TextColumn(width="medium"),
-            "실현 손익": st.column_config.TextColumn(width="medium"),
-            "수익률": st.column_config.TextColumn(width="small"),
-            "매수 시각": st.column_config.TextColumn(width="medium"),
-            "매도 시각": st.column_config.TextColumn(width="medium"),
-        },
     )
 
 
@@ -503,30 +490,22 @@ def _render_llm_decisions(decisions: list[LLMDecision]) -> None:
             "프롬프트 요약": d.prompt_summary,
         })
 
+    df = pd.DataFrame(rows)
     st.dataframe(
-        pd.DataFrame(rows),
+        df.style.map(_signal_action_style, subset=["신호"]),
         width="stretch",
         hide_index=True,
-        column_config={
-            "시각": st.column_config.TextColumn(width="medium"),
-            "공급자": st.column_config.TextColumn(width="small"),
-            "모델": st.column_config.TextColumn(width="medium"),
-            "신호": st.column_config.TextColumn(width="small"),
-            "입력 토큰": st.column_config.NumberColumn(width="small"),
-            "출력 토큰": st.column_config.NumberColumn(width="small"),
-            "프롬프트 요약": st.column_config.TextColumn(width="large"),
-        },
     )
 
 
-def _open_position_rows(positions: list[Position], currency: str) -> pd.DataFrame:
+def _open_position_rows(positions: list[Position], currency: str):
     rows = []
     for pos in positions:
         cost = pos.entry_price * pos.quantity if pos.entry_price and pos.quantity else 0
         if pos.entry_price and pos.mark_price:
             if pos.side == PositionSide.LONG:
                 unrealized_pct = (pos.mark_price / pos.entry_price - 1) * 100
-            else:  # SHORT
+            else:
                 unrealized_pct = (pos.entry_price / pos.mark_price - 1) * 100
         else:
             unrealized_pct = 0
@@ -537,13 +516,20 @@ def _open_position_rows(positions: list[Position], currency: str) -> pd.DataFram
             "평균 매수가": _money(pos.entry_price, currency),
             "현재가": _money(pos.mark_price, currency),
             "미실현 손익": _money(pos.unrealized_pnl or 0, currency),
-            "수익률": f"{unrealized_pct:+.2f}%",
+            "수익률 %": f"{unrealized_pct:+.2f}%",
             "투자 금액": _money(cost, currency),
             "손절가": _money(pos.stop_loss, currency) if pos.stop_loss else "—",
             "익절가": _money(pos.take_profit, currency) if pos.take_profit else "—",
             "매수 시각": pos.opened_at.strftime("%Y-%m-%d %H:%M") if pos.opened_at else "",
+            "_pnl_raw": unrealized_pct,
         })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    return (
+        df.style
+        .apply(_pnl_row_style, axis=1)
+        .map(_dir_cell_style, subset=["방향"])
+        .hide(["_pnl_raw"], axis="columns")
+    )
 
 
 def _signal_rows(signals: list[TradeSignal], currency: str) -> pd.DataFrame:

@@ -77,6 +77,21 @@ class PaperExecutor(BaseExecutor):
         else:
             liquidation_price = approval.liquidation_price or round(mark_price * (1 + 1 / max(leverage, 1)), 8)
 
+        # Adjust SL/TP to preserve LLM's intended offset from the actual entry price.
+        # LLM calculates SL/TP relative to signal.entry_price; actual fill is mark_price.
+        llm_entry = signal.entry_price or mark_price
+        if signal.stop_loss is not None and llm_entry != mark_price:
+            sl_offset = signal.stop_loss - llm_entry
+            actual_stop_loss = round(mark_price + sl_offset, 8)
+        else:
+            actual_stop_loss = signal.stop_loss
+
+        if signal.take_profit is not None and llm_entry != mark_price:
+            tp_offset = signal.take_profit - llm_entry
+            actual_take_profit = round(mark_price + tp_offset, 8)
+        else:
+            actual_take_profit = signal.take_profit
+
         position = Position(
             symbol=signal.symbol,
             side=position_side,
@@ -84,8 +99,8 @@ class PaperExecutor(BaseExecutor):
             entry_price=mark_price,
             mark_price=mark_price,
             liquidation_price=liquidation_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
+            stop_loss=actual_stop_loss,
+            take_profit=actual_take_profit,
             leverage=leverage,
         )
         signal.status = "EXECUTED"
