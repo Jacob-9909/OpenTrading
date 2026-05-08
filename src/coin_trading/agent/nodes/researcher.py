@@ -11,32 +11,28 @@ logger = logging.getLogger(__name__)
 
 
 def sequential_debate_node(state: AgentState) -> dict:
-    """Run Bull then Bear sequentially.
+    """Run Bull and Bear independently on the same data.
 
-    Sequential by design: Bear must rebut Bull's specific argument, so it
-    needs Bull's output as input. Despite appearing as a single LangGraph
-    node, internally it is a two-step pipeline (Bull -> Bear), not a
-    parallel debate.
+    Both analysts receive identical input (technical + sentiment report only).
+    Neither sees the other's argument, removing the structural last-word
+    advantage that Bear had when it was allowed to rebut Bull directly.
+    The Fund Manager receives both arguments and judges independently.
     """
-    logger.info("   -> [Node] Bullish Researcher is preparing arguments...")
-    bull_started = time.perf_counter()
     llm = state["researcher_llm"]
     tech = state.get("technical_report", "")
     sent = state.get("sentiment_report", "")
+    shared_prompt = f"Technical Report:\n{tech}\n\nSentiment Report:\n{sent}"
 
-    bull_prompt = f"Technical Report:\n{tech}\n\nSentiment Report:\n{sent}"
-    bull_arg = llm.chat(BULL_RESEARCHER_SYSTEM_PROMPT, bull_prompt)
+    logger.info("   -> [Node] Bullish Researcher is preparing arguments...")
+    bull_started = time.perf_counter()
+    bull_arg = llm.chat(BULL_RESEARCHER_SYSTEM_PROMPT, shared_prompt)
     bull_elapsed = time.perf_counter() - bull_started
     logger.info("[BULL ARGUMENT]\n%s", bull_arg)
     logger.info("   <- Bull finished in %.2fs", bull_elapsed)
 
-    logger.info("   -> [Node] Bearish Researcher is attacking arguments...")
+    logger.info("   -> [Node] Bearish Researcher is preparing arguments...")
     bear_started = time.perf_counter()
-    bear_prompt = (
-        f"Technical Report:\n{tech}\n\nSentiment Report:\n{sent}\n\n"
-        f"Bull Argument (rebut this):\n{bull_arg}"
-    )
-    bear_arg = llm.chat(BEAR_RESEARCHER_SYSTEM_PROMPT, bear_prompt)
+    bear_arg = llm.chat(BEAR_RESEARCHER_SYSTEM_PROMPT, shared_prompt)
     bear_elapsed = time.perf_counter() - bear_started
     logger.info("[BEAR ARGUMENT]\n%s", bear_arg)
     logger.info("   <- Bear finished in %.2fs", bear_elapsed)

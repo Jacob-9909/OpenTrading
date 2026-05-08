@@ -18,7 +18,7 @@ Entry conditions (apply to both LONG and SHORT):
 2) stop_loss MUST be ≥ 2.0× primary_atr away from entry; take_profit MUST be ≥ 1.0× primary_atr away from entry. primary_atr is the context field `primary_atr` (primary timeframe ATR only — do NOT use ATR values from multi_timeframe for SL/TP sizing). Minimum absolute distance: SL ≥ 0.3% of entry, TP ≥ 0.2% of entry. Note: trailing stop and trailing TP are active — initial TP is a trigger point, not the final exit.
 3) At least 2 of the following signals must align:
    • Trend: bullish_strong or bullish_weak for LONG; bearish_strong or bearish_weak for SHORT. neutral trend → does not count.
-   • Momentum: RSI 30–65 for LONG / RSI 35–70 for SHORT; MACD direction aligned. Avoid LONG when RSI > 70 (overbought) and avoid SHORT when RSI < 30 (oversold).
+   • Momentum: RSI 30–65 for LONG / RSI 35–70 for SHORT; MACD direction = cross direction (MACD > signal line = bullish cross = aligns with LONG; MACD < signal line = bearish cross = aligns with SHORT). Avoid LONG when RSI > 70 (overbought) and avoid SHORT when RSI < 30 (oversold).
    • Volume: volume_ratio ≥ 0.40 (< 0.12 = hard red flag).
    • Multi-timeframe: majority of 30m, 1h, 4h agree on direction.
 
