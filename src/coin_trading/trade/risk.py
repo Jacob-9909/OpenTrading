@@ -294,6 +294,19 @@ class RiskEngine:
             return f"Re-entry cooldown: {self.settings.reentry_cooldown_minutes}m after last trade."
         if signal.side in {SignalSide.LONG, SignalSide.SHORT} and signal.confidence < 0.50:
             return "Signal confidence is below minimum threshold (0.50)."
+        if signal.side in {SignalSide.LONG, SignalSide.SHORT}:
+            equity = self._current_equity(session, signal.symbol, mark_price)
+            open_positions = (
+                session.query(Position)
+                .filter_by(symbol=signal.symbol, status=PositionStatus.OPEN)
+                .all()
+            )
+            total_notional = sum(p.quantity * p.entry_price for p in open_positions)
+            if total_notional >= equity:
+                return (
+                    f"Total open notional ({total_notional:,.0f}) "
+                    f">= equity ({equity:,.0f}). No new positions."
+                )
         return None
 
     def _position_quantity(

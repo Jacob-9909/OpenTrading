@@ -48,7 +48,12 @@ class GeminiSummarizer:
 
         from google import genai
 
-        self._client = genai.Client(vertexai=True, project=project_id, location=location)
+        self._client = genai.Client(
+            vertexai=True,
+            project=project_id,
+            location=location,
+            http_options={"timeout": 30},
+        )
         self._model_id = model_id
 
     def summarize(self, ctx: TradeContext) -> str:
