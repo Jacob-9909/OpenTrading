@@ -25,8 +25,7 @@ services:
       db:
         condition: service_healthy
     command: ["coin-trading", "serve-all"]
-    volumes:
-      - ./src:/app/src
+    restart: unless-stopped
 
   dashboard:
     build: .
@@ -40,8 +39,7 @@ services:
     command: ["streamlit", "run", "src/coin_trading/dashboard.py", "--server.address=0.0.0.0"]
     ports:
       - "8501:8501"
-    volumes:
-      - ./src:/app/src
+    restart: unless-stopped
 
 volumes:
   postgres_data:
