@@ -127,8 +127,8 @@ def _enforce_min_sltp(payload: dict, price: float, atr: float) -> dict:
     except (TypeError, ValueError):
         return payload
 
-    min_sl_dist = max(atr * 1.5, ep_f * 0.003)
-    min_tp_dist = max(atr * 3.0, ep_f * 0.006)
+    min_sl_dist = max(atr * 2.0, ep_f * 0.003)
+    min_tp_dist = max(atr * 4.0, ep_f * 0.006)
 
     result = dict(payload)
     if action == "LONG":
