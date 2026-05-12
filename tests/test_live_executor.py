@@ -78,6 +78,7 @@ def test_live_executor_places_limit_buy_when_enabled() -> None:
             trading_mode="live",
             live_trading_enabled=True,
             live_max_order_krw=200_000,
+            live_order_type="limit",
         ),
         client,  # type: ignore[arg-type]
     ).execute(session, signal, RiskApproval(True, "Approved.", quantity=0.001), mark_price=100_000_000)

@@ -48,6 +48,7 @@ class TradingPipeline:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._ws_active = False
+        self._last_tick_price: float | None = None
         client = create_exchange_client(settings)
         self.account_client = client
         self.market_data = MarketDataCollector(client, settings)
@@ -194,13 +195,16 @@ class TradingPipeline:
                 timeframe=self.settings.timeframe,
                 latest_price=latest_price,
             )
-            execution_price = self.market_data.get_mark_price(self.settings.symbol) if self._ws_active else latest_price
             if self._ws_active:
+                execution_price = self._last_tick_price or self.market_data.get_mark_price(self.settings.symbol)
                 drift = abs(execution_price - snapshot_price) / snapshot_price
+                source = "ws_tick" if self._last_tick_price else "rest_fallback"
                 logger.info(
-                    "[decide] execution_price=%s snapshot=%s drift=%.2f%%",
-                    execution_price, snapshot_price, drift * 100,
+                    "[decide] execution_price=%s snapshot=%s drift=%.2f%% source=%s",
+                    execution_price, snapshot_price, drift * 100, source,
                 )
+            else:
+                execution_price = latest_price
             approval = self.risk.evaluate(session, signal, execution_price)
             order = None
             if self.settings.trading_mode != "signal_only":
@@ -319,6 +323,7 @@ class TradingPipeline:
             logger.warning("[notify] 알림 전송 실패: %s", exc)
 
     def _on_monitor_price(self, price: float) -> None:
+        self._last_tick_price = price
         try:
             with SessionLocal() as session:
                 events = self.risk.monitor_open_positions(session, price, self.settings.symbol)

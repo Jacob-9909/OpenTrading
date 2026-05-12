@@ -43,7 +43,10 @@ class BithumbLiveExecutor(BaseExecutor):
             return self._reject(session, signal, safety_rejection, mark_price)
 
         side = self._order_side(signal.side)
-        order_price = signal.entry_price or mark_price
+        if self.settings.live_order_type == "market":
+            order_price = mark_price
+        else:
+            order_price = signal.entry_price or mark_price
         response = self._place_order(signal, approval.quantity, order_price)
         order = PaperOrder(
             trade_signal_id=signal.id,
