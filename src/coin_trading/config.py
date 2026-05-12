@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     max_data_staleness_minutes: int = Field(default=30, ge=1)
     reentry_cooldown_minutes: int = Field(default=0, ge=0)
     trailing_stop_pct: float | None = Field(default=None, gt=0, le=0.5)
+    trailing_stop_activation_pct: float = Field(default=0.004, ge=0, le=0.5)
     trailing_tp_pct: float | None = Field(default=None, gt=0, le=0.5)
     price_consistency_threshold_pct: float = Field(default=0.5, ge=0.0)
 

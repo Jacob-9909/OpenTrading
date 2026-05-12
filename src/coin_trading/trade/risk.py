@@ -105,14 +105,19 @@ class RiskEngine:
             position.mark_price = mark_price
             position.unrealized_pnl = self._unrealized_pnl(position, mark_price)
             if self.settings.trailing_stop_pct:
+                activation = self.settings.trailing_stop_activation_pct
                 if position.side == PositionSide.LONG:
-                    new_stop = round(mark_price * (1 - self.settings.trailing_stop_pct), 8)
-                    if position.stop_loss is None or new_stop > position.stop_loss:
-                        position.stop_loss = new_stop
+                    activated = mark_price >= position.entry_price * (1 + activation)
+                    if activated:
+                        new_stop = round(mark_price * (1 - self.settings.trailing_stop_pct), 8)
+                        if position.stop_loss is None or new_stop > position.stop_loss:
+                            position.stop_loss = new_stop
                 elif position.side == PositionSide.SHORT:
-                    new_stop = round(mark_price * (1 + self.settings.trailing_stop_pct), 8)
-                    if position.stop_loss is None or new_stop < position.stop_loss:
-                        position.stop_loss = new_stop
+                    activated = mark_price <= position.entry_price * (1 - activation)
+                    if activated:
+                        new_stop = round(mark_price * (1 + self.settings.trailing_stop_pct), 8)
+                        if position.stop_loss is None or new_stop < position.stop_loss:
+                            position.stop_loss = new_stop
             if self.settings.trailing_tp_pct:
                 self._apply_trailing_tp(session, position, mark_price)
             tp_hit = (
@@ -245,14 +250,9 @@ class RiskEngine:
             remaining = position.take_profit - mark_price
             if remaining <= 0:
                 return
-            if remaining < atr * 1.5:
-                # TP 근접 → SL 상향 (이익 보호)
+            if remaining < atr * 1.0:
+                # TP 임박 → SL 상향 (이익 보호)
                 tightened = round(mark_price - atr * 0.5, 8)
-                if tightened > position.stop_loss:
-                    position.stop_loss = tightened
-            elif remaining < atr * 3.0:
-                # 중간 거리 → SL 소폭 상향
-                tightened = round(position.entry_price + atr * 0.3, 8)
                 if tightened > position.stop_loss:
                     position.stop_loss = tightened
 
@@ -260,12 +260,8 @@ class RiskEngine:
             remaining = mark_price - position.take_profit
             if remaining <= 0:
                 return
-            if remaining < atr * 1.5:
+            if remaining < atr * 1.0:
                 tightened = round(mark_price + atr * 0.5, 8)
-                if tightened < position.stop_loss:
-                    position.stop_loss = tightened
-            elif remaining < atr * 3.0:
-                tightened = round(position.entry_price - atr * 0.3, 8)
                 if tightened < position.stop_loss:
                     position.stop_loss = tightened
 
