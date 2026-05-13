@@ -299,12 +299,24 @@ class TradingPipeline:
                 symbol=self.settings.symbol,
                 mark_price=mark_price,
             )
+            llm_entry = signal.entry_price or mark_price
+            offset = mark_price - llm_entry
+            adjusted_sl = (
+                round(signal.stop_loss + offset, 8)
+                if signal.stop_loss is not None and offset
+                else signal.stop_loss
+            )
+            adjusted_tp = (
+                round(signal.take_profit + offset, 8)
+                if signal.take_profit is not None and offset
+                else signal.take_profit
+            )
             ctx = TradeContext(
                 symbol=signal.symbol,
                 side=signal.side.value,
-                entry_price=signal.entry_price or mark_price,
-                stop_loss=signal.stop_loss,
-                take_profit=signal.take_profit,
+                entry_price=mark_price,
+                stop_loss=adjusted_sl,
+                take_profit=adjusted_tp,
                 confidence=signal.confidence,
                 rationale=signal.rationale,
                 mark_price=mark_price,
